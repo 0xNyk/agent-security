@@ -23,8 +23,10 @@
 #                             on star-bearing repos (best-effort via gh api)
 #   5. Star-loss recovery   — informational: repos still showing lost stars
 #
-# Exit: nonzero if any HIGH exposure remains (usable as a gate). The REPORT is the
-# value — read it, don't just check the code.
+# Exit: 0 = no confirmed HIGH exposure · 1 = OPEN HIGH exposure · 3 = DEGRADED, a
+# check could NOT be verified in this context (e.g. token scope unreadable) — NOT a
+# pass, do not treat as safe. Usable as a gate. The REPORT is the value — read it,
+# don't just check the code.
 #
 # Flags:
 #   --auth-status-file F  read `gh auth status` output from F instead of calling gh
@@ -60,17 +62,21 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-HIGH=0; MED=0; INFO=0; OK=0
+HIGH=0; MED=0; INFO=0; OK=0; UNKNOWN=0
 hi()   { printf '  \033[31mHIGH\033[0m  %s\n' "$1"; HIGH=$((HIGH+1)); }
 med()  { printf '  \033[33mMED \033[0m  %s\n' "$1"; MED=$((MED+1)); }
 good() { printf '  \033[32mOK  \033[0m  %s\n' "$1"; OK=$((OK+1)); }
 info() { printf '  INFO  %s\n' "$1"; INFO=$((INFO+1)); }
+# WARN = DEGRADED / could-not-verify. NOT benign: a check that could not run must
+# never be counted as a pass. UNKNOWN>0 blocks the "no confirmed HIGH exposure" verdict.
+warn() { printf '  \033[35mWARN\033[0m  %s\n' "$1"; UNKNOWN=$((UNKNOWN+1)); }
 risk() { printf '        \033[2mresidual:\033[0m %s\n' "$1"; }
 fix()  { printf '        fix: %s\n' "$1"; }
 if [[ ! -t 1 || -n "${NO_COLOR:-}" ]]; then
   hi()   { printf '  HIGH  %s\n' "$1"; HIGH=$((HIGH+1)); }
   med()  { printf '  MED   %s\n' "$1"; MED=$((MED+1)); }
   good() { printf '  OK    %s\n' "$1"; OK=$((OK+1)); }
+  warn() { printf '  WARN  %s\n' "$1"; UNKNOWN=$((UNKNOWN+1)); }
   risk() { printf '        residual: %s\n' "$1"; }
 fi
 
@@ -93,19 +99,29 @@ fi
 
 SCOPE_LINE="$(printf '%s\n' "$AUTH_TXT" | grep -i 'Token scopes:' | head -1 || true)"
 TOKEN_TIER="UNKNOWN"
+# HONEST FAILURE MODE: three states only —
+#   (a) readable + delete_repo   -> HIGH   (it CAN destroy)
+#   (b) readable + no delete_repo -> OK    (it cannot delete/transfer)
+#   (c) COULD-NOT-VERIFY          -> WARN/UNKNOWN (DEGRADED, never benign)
+# The old code reported "INVALID -> benign MED, exit 0". A token we could not READ
+# (keyring/permission blocked, gh not logged in here, command failed) is NOT proof of
+# safety — reporting it green is FALSE COMFORT. Any could-not-verify state is UNKNOWN,
+# blocks the clear verdict, and exits nonzero.
+CANT_VERIFY="could not verify token scope in this context — re-run in an interactive terminal with keyring access; do NOT treat this as safe"
 if [[ -z "$AUTH_TXT" ]]; then
-  med "cannot read token: gh not installed or no auth status available ($AUTH_SRC)"
-  risk "scope is UNVERIFIED — treat as OPEN. When you authenticate, verify the token carries NO delete_repo."
-  TOKEN_TIER="UNVERIFIED"
+  warn "$CANT_VERIFY (gh not installed or no auth status available — $AUTH_SRC)"
+  risk "scope is UNVERIFIED, not clear. UNKNOWN != safe: authenticate in a context where 'gh auth status' succeeds, then confirm the token carries NO delete_repo."
+  TOKEN_TIER="UNKNOWN"
 elif printf '%s\n' "$AUTH_TXT" | grep -qiE 'invalid|failed to log in|not logged'; then
-  med "active token is INVALID / not logged in — scopes cannot be read ($AUTH_SRC)"
-  risk "an invalid token cannot act right now. On re-auth, mint a MINIMAL-scope automation token (no delete_repo) and re-run this check."
-  fix "gh auth refresh -h github.com -s repo,read:org,workflow   (grant delete_repo ONLY for a rare, manual human delete)"
-  TOKEN_TIER="INVALID"
+  warn "$CANT_VERIFY (gh could not read the token — not-logged-in / invalid / keyring error, $AUTH_SRC)"
+  risk "gh could not read the token HERE — keyring/permission/session, not a proof of safety. DEGRADED, not benign. Do NOT record this run as a pass; the token's real scope is still unknown."
+  fix "re-run in an interactive terminal where 'gh auth status' succeeds (keyring unlocked), then confirm the token carries NO delete_repo (mint a MINIMAL-scope automation token: repo,read:org,workflow — delete_repo ONLY for rare manual human deletes)."
+  TOKEN_TIER="UNKNOWN"
 elif [[ -z "$SCOPE_LINE" ]]; then
-  med "authenticated, but no classic 'Token scopes:' line found (likely a fine-grained PAT)"
-  risk "fine-grained PATs express repo administration as PERMISSIONS, not classic scopes — gh does not print them. Verify in the token's page that it lacks 'Administration: read+write' (which permits delete) on any repo it can reach."
-  TOKEN_TIER="FINE_GRAINED"
+  warn "$CANT_VERIFY (authenticated, but no classic 'Token scopes:' line — likely a fine-grained PAT)"
+  risk "fine-grained PATs express repo administration as PERMISSIONS, not classic scopes — gh does not print them, so delete capability cannot be confirmed from here. Treat as UNVERIFIED, not safe."
+  fix "open the token's page and confirm it lacks 'Administration: read+write' (which permits delete) on any repo it can reach."
+  TOKEN_TIER="UNKNOWN_FINEGRAINED"
 elif printf '%s\n' "$SCOPE_LINE" | grep -q 'delete_repo'; then
   hi "token carries delete_repo → it CAN delete/transfer any repo it can access"
   echo "        scopes: ${SCOPE_LINE#*Token scopes: }"
@@ -212,10 +228,14 @@ if [[ "$BRIEF" -eq 0 ]]; then
   echo "  The local repo-guard would have caught the PATH-resolved case only — a brake, not a guarantee."
   echo "-------------------------------------------------------------------"
 fi
-echo "HARDEN: HIGH $HIGH · MED $MED · OK $OK · INFO $INFO · token=$TOKEN_TIER · guard=$([[ $GUARD_OK -eq 1 ]] && echo armed || echo degraded)"
+echo "HARDEN: HIGH $HIGH · MED $MED · OK $OK · INFO $INFO · UNKNOWN $UNKNOWN · token=$TOKEN_TIER · guard=$([[ $GUARD_OK -eq 1 ]] && echo armed || echo degraded)"
 if [[ "$HIGH" -gt 0 ]]; then
   [[ "$BRIEF" -eq 0 ]] && echo "VERDICT: OPEN HIGH EXPOSURE — a token/policy CAN still destroy repos. Fix item(s) above (user action at GitHub)."
   exit 1
+fi
+if [[ "$UNKNOWN" -gt 0 ]]; then
+  [[ "$BRIEF" -eq 0 ]] && echo "VERDICT: DEGRADED — one or more capability checks could NOT be verified in this context (e.g. token scope unreadable: keyring/permission blocked or gh not logged in). This is NOT a pass and NOT 'no confirmed HIGH exposure' — do not treat it as safe. Re-run unsandboxed / in an interactive terminal with keyring access."
+  exit 3
 fi
 [[ "$BRIEF" -eq 0 ]] && echo "VERDICT: no confirmed HIGH exposure (review MED/INFO — capability removal at GitHub is the durable control)."
 exit 0

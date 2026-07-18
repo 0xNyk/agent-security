@@ -17,13 +17,16 @@ Thanks for helping make agent supply-chain security a little more boring.
 ## Before you open a PR
 
 ```bash
-bash tests/test-scan.sh    # scanner fixtures
-bash tests/test-guard.sh   # guard, offline fake gh
-bash tests/self-scan.sh    # this repo must be clean under its own scanner
+bash tests/test-scan.sh          # leak/dropper scanner fixtures
+bash tests/test-vet.sh           # inbound vetting fixtures (poisoned template -> REJECT)
+bash tests/test-harden.sh        # harden-check scope-parsing (mock gh auth status, offline)
+bash tests/test-scan-content.sh  # untrusted-content tripwire fixtures
+bash tests/test-guard.sh         # guard, offline fake gh
+bash tests/self-scan.sh          # this repo must be clean under its own scanner
 ```
 
-All three must pass. If you add a detection class, add both a positive fixture
-(it fires) and a negative fixture (it does not false-positive).
+All six must pass (CI runs the same set). If you add a detection class, add both a
+positive fixture (it fires) and a negative fixture (it does not false-positive).
 
 ## Reporting a vulnerability
 

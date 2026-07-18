@@ -1,109 +1,128 @@
 # agent-security
 
-Two focused, deterministic defenses for repositories that AI agents and automations
-touch — with honest boundaries on every claim.
+Deterministic, defensive gates for repositories that AI agents and automations touch —
+with an honest boundary printed on every claim.
 
-- **`scan-repo`** — a network-free leak + dropper gate. Blocks secrets, obfuscated
-  code-execution droppers, invisible/obfuscating unicode, and private-context leaks
-  from entering a repo you are about to publish or push.
-- **`repo-guard`** — a `gh` PATH shim plus an optional Claude Code hook that hard-block
-  destructive GitHub repo-lifecycle operations (delete / rename / transfer / privatize /
-  archive) unless a human confirms the *exact* repository. Normal gh usage is untouched.
-- **`scan-content`** — a KNOWN-pattern **tripwire** for untrusted fetched content (web-search
-  results, fetched pages, tool/MCP outputs, pasted text), paired with a **behavioral
-  contract** for handling untrusted content. Prompt injection is **unsolved**: this
-  *reduces* risk (detects known injection/social-engineering shapes) and *guides* the
-  architectural defense — it does **not** prevent injection. See below.
+It ships five small, tested tools: a pre-publish leak/dropper scanner, an inbound
+supply-chain vetter, an untrusted-content tripwire, a local guard against destructive
+`gh` repo-lifecycle operations, and a read-only audit of the capability that actually
+lets a token destroy repos. Each one is a **Tier-1 gate** — cheap, deterministic, run
+first — not a security program, and none of them overclaims.
 
-This is **v0.1**: focused, tested, and deliberately narrow. It is a set of Tier-1 gates,
-not a security program. **Defensive use only** — it detects and blocks; it does not
-generate, obfuscate, or deliver anything.
+**Defensive use only.** These tools detect and block; they do not generate, obfuscate,
+or deliver anything. The dropper "fixtures" are inert documentation examples.
 
-## Why it exists — two real incidents
+## Capabilities
 
-1. **A starter-template dropper.** A poisoned scaffold shipped an obfuscated
-   code-execution payload: a base64 string in a committed `.env`, decoded and executed by
-   a separate build/test config, invisible to registry scanners because a git-cloned
-   template has no registry provenance at all. `scan-repo` catches the same-file shapes of
-   this class — and is explicit about the cross-file split it cannot see.
-2. **Repository destruction by automation.** An automation with GitHub credentials
-   performed destructive repo-lifecycle operations across public repositories and wiped out
-   thousands of accumulated stars before a human could intervene. `repo-guard` turns that
-   one-command catastrophe into a deliberate, per-repo human act.
+| Capability | Verb | What it does |
+|---|---|---|
+| **vet** | `vet` | Vets an **inbound** third-party template / package / plugin / skill *before* you adopt it — the poisoned-scaffold vector. Scan-only: it never runs install/build/postinstall. Emits ADOPT / REVIEW / REJECT. |
+| **scan** | `scan` | Network-free leak + dropper gate over **your** repo before you publish or push. Blocks secrets, same-file decode-then-exec droppers, invisible/bidi unicode, and private-context leaks. |
+| **scan-content** | `scan-content` | Same-file **tripwire** for **untrusted fetched content** (web-search results, fetched pages, tool/MCP output, pasted text). Flags known prompt-injection and social-engineering shapes. Detection only — see limits. |
+| **guard** | `guard-install` · `--status` | Local `gh` PATH shim (+ optional Claude Code hook) that blocks destructive repo-lifecycle ops — delete / rename / transfer / privatize / archive — unless a human names the **exact** repo. Normal `gh` usage is untouched. |
+| **harden** | `harden` | Read-only audit of the **real** destructive-capability surface: does the active token carry `delete_repo`, are org deletion/transfer restrictions on, is the default branch protected. Audits and guides — **you** apply the GitHub-side fixes. |
 
-Both incidents are described generically here. The threat background cites **public**
-primary sources (xz-utils CVE-2024-3094, Shai-Hulud, Nx/s1ngularity, GlassWorm,
-tj-actions CVE-2025-30066, OWASP LLM Top 10) — see `references/threat-model.md`.
+## Why it exists — two incidents (described generically)
 
-## Install
+1. **A poisoned starter template.** A cloned scaffold shipped an obfuscated
+   code-execution dropper: an encoded payload committed in one file, decoded and
+   executed by a separate build/test config — invisible to registry scanners because a
+   git-cloned template has no registry provenance at all. `vet` gates that class *before*
+   adoption; `scan` catches its same-file shape, and both are explicit about the
+   cross-file split they cannot see.
+2. **Repository destruction by automation.** An automation holding GitHub credentials
+   ran destructive repo-lifecycle operations across public repositories and wiped out
+   thousands of accumulated stars before a human could intervene. `guard` turns that
+   one-command catastrophe into a deliberate, per-repo human act; `harden` audits the
+   token scope and org policy that would have made it impossible in the first place.
+
+The threat background cites **public** primary sources (xz-utils CVE-2024-3094,
+Shai-Hulud, Nx/s1ngularity, GlassWorm, tj-actions CVE-2025-30066, OWASP LLM Top 10) —
+see `references/threat-model.md`.
+
+## Install / quickstart
 
 ```sh
-# Scanner — no install; run from your repo root
+# scan — pre-publish leak/dropper sweep (no install; run from your repo root)
 scripts/scan-repo.sh --all
 
-# Guard — PATH shim, optionally the Claude hook and PATH setup
+# vet — check an inbound template/package BEFORE you adopt it (never installs it)
+scripts/vet-incoming.sh ./cloned-template
+scripts/vet-incoming.sh --url https://github.com/owner/starter
+
+# scan-content — tripwire on untrusted fetched content
+scripts/scan-content.sh fetched.txt
+fetch ... | scripts/scan-content.sh
+
+# guard — install the gh shim (+ optional Claude hook), then check status
 scripts/repo-guard-install.sh --with-hook --setup-path
 scripts/repo-guard-install.sh --status
+
+# harden — audit the destructive-capability surface (read-only)
+scripts/harden-check.sh --offline        # token scope + local guard, no network
+scripts/harden-check.sh                   # + org policy + branch protection
 ```
 
-Requires `bash`, `git`, and `python3` (the invisible-unicode class, the hook, and the
-installer's JSON merge use python3). Full detail, private-marker setup, and removal:
+Requires `bash`, `git`, and `python3` (the invisible-unicode class, the Claude hook, and
+the installer's JSON merge use python3). Full detail, private-marker setup, and removal:
 `references/install.md`.
 
-## Honest coverage summary
+## What this does NOT do / when NOT to rely on it
 
-**`scan-repo` catches:** private-key blocks and known token shapes; secret assignments and
-`*_SECRET/*_TOKEN=` env lines; connection strings, JWTs, cookies; same-file droppers
-(decode encoder + exec sink co-occurring); base64 blobs under env keys in committed `.env`;
-invisible/bidi/PUA/variation-selector unicode; personal home paths, private IPs, internal
-hostnames, real emails/phones; and optional user-defined private markers.
+Read this before you trust any result. A security tool that overclaims is worse than none.
 
-**`repo-guard` blocks:** `gh repo delete|rename|transfer|archive`, `edit --visibility
-private|internal`, and the equivalent `gh api`/graphql mutations — unless
-`REPO_LIFECYCLE_OK` names the exact repo.
-
-**`scan-content` flags (KNOWN patterns only — a tripwire, not a filter):** imperative
-instruction-override / role-switch, exfiltration requests, credential / system-prompt
-solicitation, covert-action requests, hidden invisible-unicode, markdown-image/link exfil
-channels, and social-engineering markers (urgency / authority / fake approval / safety-bypass).
-
-## When NOT to use this / what it does not cover
-
-- **Not a replacement** for gitleaks, TruffleHog, Semgrep, CodeQL, GitHub secret scanning /
-  push protection, org-level repo-deletion restrictions, or a real security program. Run it
-  *alongside* those, as a fast first line.
-- **`scan-repo` is same-file only.** It **cannot** detect a cross-file dropper (decode in
-  one file, exec sink in another) — the exact shape of the motivating incident. That needs
-  AST/dataflow taint (Semgrep Pro / CodeQL). It also will not catch novel encoders / custom
-  alphabets, minified/vendored/WASM payloads, steganographic carriers, remote second stages,
-  or verified-live secrets (it matches *shapes*, it does not call the provider).
-- **`repo-guard` has a known bypass.** A tool calling the real `gh` by **absolute path**
-  outside a Claude session skips the PATH shim; a plain terminal doing the same is not
-  covered; `curl` against the REST API is out of scope. It targets *accidental / automated*
-  destruction, not a determined operator, and it is a local per-machine brake — **not**
-  server-side org policy.
-- **Prompt injection is unsolved — `scan-content` does not solve it.** It catches a fixed
-  set of KNOWN injection / social-engineering patterns and is **trivially evaded** by novel
-  phrasing, encoding, translation, paraphrase, or splitting a payload across lines. It is a
-  **tripwire, not a filter**: a hit means "a human should look"; a CLEAN result means "no
-  known pattern matched," **not** "safe." The load-bearing defense is the behavioral contract
-  in `references/untrusted-content.md` (treat fetched content as data; break the lethal
-  trifecta; Rule of Two; human gate before acting on discovered instructions) plus
-  architectural capability limits — which this skill **guides but cannot enforce**. Detection
-  is a cheap tripwire on top of that contract, never a substitute for it.
-- **Don't** treat a clean scan or an installed guard as permission to skip review, least
-  privilege, credential rotation, or org-level protections.
+- **Not a replacement** for gitleaks, TruffleHog, Socket, Snyk, Semgrep, CodeQL, GitHub
+  secret scanning / push protection, or org-level security policy. Run these gates
+  *alongside* those, as a fast first line — never instead of them.
+- **The scanners are same-file tripwires.** `scan` and `vet` match *shapes* in a single
+  file. They **cannot** see a cross-file dropper (decode in one file, exec sink in
+  another) — the exact shape of the motivating incident — nor novel encoders, custom
+  alphabets, minified/vendored/WASM payloads, steganographic carriers, remote second
+  stages, or verified-live secrets (they match patterns; they never call the provider). A
+  clean result means "no known pattern matched," **not** "safe." Cross-file dropper
+  detection needs AST/dataflow taint (Semgrep Pro / CodeQL).
+- **Prompt injection is unsolved, and `scan-content` does not solve it.** It catches a
+  fixed set of **known** injection / social-engineering patterns and is **trivially
+  evaded** by novel phrasing, encoding, translation, paraphrase, or splitting a payload
+  across lines. It is a **tripwire, not a filter**: a hit means "a human should look"; a
+  CLEAN result means "no known pattern matched," not "safe." The load-bearing defense is
+  the behavioral contract in `references/untrusted-content.md` (treat fetched content as
+  data; break the lethal trifecta; Rule of Two; human gate before acting on discovered
+  instructions) plus architectural capability limits — which this skill **guides but
+  cannot enforce**.
+- **The guard is a local brake with known bypasses.** It stops interactive and
+  PATH-resolved destruction. It is **bypassed** by calling the real `gh` at an absolute
+  path outside a Claude session, and by `curl`/octokit against the REST API. It reduces
+  *accidental / automated* destruction; it is **not** a determined-operator control and
+  **not** server-side org policy.
+- **`harden` audits — it does not fix.** It never changes your token or org settings.
+  The durable prevention (mint an automation token **without** `delete_repo`, turn on
+  org deletion/transfer restrictions, protect default branches) is a **GitHub-side action
+  you must apply yourself**, some of it requiring org-admin. When `harden` cannot verify
+  a check (e.g. the token scope is unreadable in a sandboxed/keyring-locked context) it
+  reports **DEGRADED (exit 3)**, never a pass — do not read an unverifiable run as clear.
+- **Don't** treat a clean scan, an installed guard, or a green harden run as permission
+  to skip code review, least privilege, credential rotation, or org-level protections.
 
 The full block lists, the same-file limitation, and the bypass matrix are in
-`references/coverage-and-limits.md`. Read it before you trust either tool.
+`references/coverage-and-limits.md`.
 
 ## Defensive use only
 
 This project exists to **detect and prevent** supply-chain compromise and accidental repo
 destruction. The dropper patterns are detection signatures and the fixtures are inert
 documentation examples. Do not repurpose any of it to build, obfuscate, or deliver a
-payload.
+payload. See `CONTRIBUTING.md` — offensive tooling and un-paired detection bypasses are
+declined.
+
+## Project
+
+- **Security policy & reporting:** [`SECURITY.md`](SECURITY.md) — report bypasses privately.
+- **Contributing:** [`CONTRIBUTING.md`](CONTRIBUTING.md) — defensive-only, no overclaiming, no real data.
+- **Changelog:** [`CHANGELOG.md`](CHANGELOG.md).
+- **Releasing:** [`RELEASE.md`](RELEASE.md).
+- **Coverage & limits:** [`references/coverage-and-limits.md`](references/coverage-and-limits.md).
 
 ## License
 
-MIT — see `LICENSE`.
+MIT — see [`LICENSE`](LICENSE).
