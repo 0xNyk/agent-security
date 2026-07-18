@@ -92,6 +92,57 @@ secret, no marker, no real personal data, and no invisible-unicode is ever allow
 
 ---
 
+## `scan-content.sh` — the untrusted-content tripwire
+
+**Prompt injection is an unsolved problem.** This tool does not solve it. It **reduces** risk
+by detecting a fixed set of KNOWN injection / social-engineering patterns in a blob of
+untrusted content (web-search result, fetched page, tool/MCP output, pasted text). It is a
+**tripwire, not a filter**, and a CLEAN result means "no known pattern matched," never "safe."
+
+### What it flags
+
+| Class | Tier | What it flags |
+|---|---|---|
+| `EXFIL` | CRITICAL | An exfil verb (`send`/`post`/`email`/`upload`/`leak`…) co-occurring on one line with a secret noun (`api key`/`password`/`token`/`.env`/`cookie`/`private key`…) **and** a destination (URL/host/email). |
+| `INJECT` | HIGH | Imperative override / role-switch: `ignore (all) previous instructions`, `disregard your rules`, `forget everything`, `new instructions:`, `you are now (a/an/unrestricted…)`, `act as DAN/unfiltered`, `override your instructions`, `enter developer mode`. |
+| `CREDS` | HIGH | Solicits the system prompt / initial instructions / an API key / `.env` / credentials (`print your system prompt`, `repeat the words above`). |
+| `COVERT` | HIGH | Asks the agent to act without informing the user (`do not tell the user`, `silently forward`, `keep this between us`). |
+| `HIDDEN_UNICODE` | HIGH | Zero-width / bidi / PUA / tag codepoints hiding text from a human reviewer (same engine as `scan-repo.sh`). |
+| `IMG_EXFIL` | HIGH | Markdown image/link whose URL **interpolates** a value (`${…}`/`{{…}}`/`%VAR%`) — a render-time exfil channel. |
+| `URL_QUERY` | MEDIUM | Markdown image/link to an external host with a querystring (possible exfil carrier; benign CDN images also match — hence MEDIUM). |
+| `ANSI` | MEDIUM | ANSI/terminal escape sequences embedded in text. |
+| `SOCIAL` | MEDIUM | Urgency, authority/impersonation, fake prior approval, safety-bypass requests. |
+
+Default exit: **1** if any CRITICAL or HIGH finding; MEDIUM-only reports and exits **0**
+(advisory) unless `--strict`. MEDIUM is where the social-engineering false-positive risk lives,
+so it never fails the tripwire by default.
+
+### What it does NOT catch — the honest boundaries
+
+- **Novel / obfuscated / paraphrased injection.** It matches fixed English shapes. Reword
+  "ignore previous instructions" as "the earlier guidance no longer applies," translate it,
+  base64 it, or split it across lines and this scanner sees nothing. Microsoft's own
+  LLMail-Inject challenge (2025) shows even *trained classifiers* fall to adaptive attackers —
+  a regex tripwire is far weaker than that.
+- **Semantic injection within allowed tools/destinations** (the confused-deputy case) looks
+  like legitimate work and has no pattern to match.
+- **Multi-hop / delayed-trigger** payloads (land in memory/RAG now, fire later) defeat any
+  single-blob scan.
+- **It cannot enforce the response.** Detecting a pattern does nothing to stop the agent
+  acting on it — that is the **behavioral contract** in `references/untrusted-content.md`, not
+  a property of this script.
+
+### What actually reduces the risk (this scanner only points at it)
+
+The durable defense is **architectural**, and this skill *guides* but **cannot mechanically
+enforce** it: treat all fetched content as data (`references/untrusted-content.md`), break the
+**lethal trifecta** (private data + untrusted content + exfil sink — Willison 2025) so a
+poisoned turn cannot both read secrets and exfiltrate, apply Meta's **Rule of Two**, allowlist
+egress, and require a human gate at trust-boundary crossings. Use the scanner as a cheap
+tripwire on top of that contract — never as a substitute for it.
+
+---
+
 ## repo-guard — the repository-lifecycle guard
 
 ### What it blocks (repo-LEVEL destruction only)

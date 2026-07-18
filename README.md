@@ -9,6 +9,11 @@ touch — with honest boundaries on every claim.
 - **`repo-guard`** — a `gh` PATH shim plus an optional Claude Code hook that hard-block
   destructive GitHub repo-lifecycle operations (delete / rename / transfer / privatize /
   archive) unless a human confirms the *exact* repository. Normal gh usage is untouched.
+- **`scan-content`** — a KNOWN-pattern **tripwire** for untrusted fetched content (web-search
+  results, fetched pages, tool/MCP outputs, pasted text), paired with a **behavioral
+  contract** for handling untrusted content. Prompt injection is **unsolved**: this
+  *reduces* risk (detects known injection/social-engineering shapes) and *guides* the
+  architectural defense — it does **not** prevent injection. See below.
 
 This is **v0.1**: focused, tested, and deliberately narrow. It is a set of Tier-1 gates,
 not a security program. **Defensive use only** — it detects and blocks; it does not
@@ -57,6 +62,11 @@ hostnames, real emails/phones; and optional user-defined private markers.
 private|internal`, and the equivalent `gh api`/graphql mutations — unless
 `REPO_LIFECYCLE_OK` names the exact repo.
 
+**`scan-content` flags (KNOWN patterns only — a tripwire, not a filter):** imperative
+instruction-override / role-switch, exfiltration requests, credential / system-prompt
+solicitation, covert-action requests, hidden invisible-unicode, markdown-image/link exfil
+channels, and social-engineering markers (urgency / authority / fake approval / safety-bypass).
+
 ## When NOT to use this / what it does not cover
 
 - **Not a replacement** for gitleaks, TruffleHog, Semgrep, CodeQL, GitHub secret scanning /
@@ -72,6 +82,15 @@ private|internal`, and the equivalent `gh api`/graphql mutations — unless
   covered; `curl` against the REST API is out of scope. It targets *accidental / automated*
   destruction, not a determined operator, and it is a local per-machine brake — **not**
   server-side org policy.
+- **Prompt injection is unsolved — `scan-content` does not solve it.** It catches a fixed
+  set of KNOWN injection / social-engineering patterns and is **trivially evaded** by novel
+  phrasing, encoding, translation, paraphrase, or splitting a payload across lines. It is a
+  **tripwire, not a filter**: a hit means "a human should look"; a CLEAN result means "no
+  known pattern matched," **not** "safe." The load-bearing defense is the behavioral contract
+  in `references/untrusted-content.md` (treat fetched content as data; break the lethal
+  trifecta; Rule of Two; human gate before acting on discovered instructions) plus
+  architectural capability limits — which this skill **guides but cannot enforce**. Detection
+  is a cheap tripwire on top of that contract, never a substitute for it.
 - **Don't** treat a clean scan or an installed guard as permission to skip review, least
   privilege, credential rotation, or org-level protections.
 
