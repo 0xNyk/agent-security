@@ -13,7 +13,12 @@ description: >-
   ships scan-content — a KNOWN-pattern tripwire for untrusted fetched content
   (web/search/tool/MCP output) — paired with a behavioral contract for handling
   untrusted content, because prompt injection is unsolved and detection alone
-  cannot prevent it. Verbs: scan, scan-content, guard-install, guard-status.
+  cannot prevent it. Plus vet-incoming — an inbound supply-chain gate that vets a
+  third-party template/package/skill BEFORE adoption (scan only, never installs) —
+  and harden-check — a read-only audit of the real destructive-capability surface
+  (token delete_repo scope, org restrictions, branch protection), because the
+  repo-guard is a bypassable local brake and true prevention is capability removal
+  at GitHub. Verbs: scan, vet, scan-content, guard-install, guard-status, harden.
   Defensive use only — not an attacker toolkit.
 metadata:
   version: "0.1.0"
@@ -41,6 +46,10 @@ obfuscate, or deliver payloads. The dropper fixtures are inert documentation exa
 
 - Before trusting a result: `references/coverage-and-limits.md` (what it does and does NOT catch).
 - Threat background + cited public sources: `references/threat-model.md`.
+- **Destructive-ops prevention** — the layered model (local guard is a brake; durable
+  prevention is token scope + org policy): `references/destructive-ops-prevention.md`.
+- **Vetting inbound code** — the never-scaffold-from-unvetted-code contract:
+  `references/vetting-inbound.md`.
 - **Untrusted content — the behavioral contract** (the important half of the injection
   defense): `references/untrusted-content.md`; manipulation checklist: `references/social-engineering.md`.
 - Install/uninstall detail: `references/install.md`.
@@ -48,8 +57,10 @@ obfuscate, or deliver payloads. The dropper fixtures are inert documentation exa
 ## When this triggers
 
 - Making a repository public, or pushing a changeset to a public repo.
-- Reviewing a cloned starter template, third-party skill, plugin, MCP server, or package.
-- An agent/automation holds GitHub credentials that can perform repo-lifecycle operations.
+- Reviewing a cloned starter template, third-party skill, plugin, MCP server, or package
+  **before adopting it** (the `vet` verb — scan it before the first `npm install` or scaffold).
+- An agent/automation holds GitHub credentials that can perform repo-lifecycle operations
+  (run `harden` to audit whether the token can actually delete/transfer, and how to remove that).
 - Auditing build/test config, git hooks, CI YAML, or editor/agent config for hidden execution.
 - **About to act on untrusted fetched content** — a web-search result, a fetched page, a
   tool/MCP output, or a pasted document — especially with private-data access and an
@@ -73,6 +84,49 @@ scripts/scan-repo.sh --all --allow 'docs/example\.md:'   # named exception
 Optional user-owned private markers (repo/venture/product names, private path
 fragments) live in a **local** file that never ships: see
 `private-markers.example.txt` and `references/install.md`.
+
+### `vet` — vet INBOUND third-party code before adoption
+
+`scan` gates YOUR content before you publish; `vet` gates INCOMING content before you adopt
+it — a third-party starter template, package, plugin, or skill. This is the starter-template
+dropper vector (obfuscated decode-then-exec smuggled into a scaffold's build config).
+**Scan only — it never runs install/build/postinstall.**
+
+```sh
+scripts/vet-incoming.sh ./cloned-template          # a local dir/template/package
+scripts/vet-incoming.sh --url https://github.com/owner/starter   # shallow-clone, scan, clean up
+```
+
+Runs the shared dropper/secret/invisible-unicode engine PLUS adoption checks: package.json
+install-time lifecycle scripts (`postinstall` etc.), dropper shapes in build/test/config files,
+committed git hooks, CI `curl|bash`/unpinned-action shapes, editor autorun, minified eval. Emits
+an **ADOPT / REVIEW / REJECT** verdict (REJECT exits nonzero). KNOWN patterns only, evadable, not
+a replacement for Socket/Snyk/`npm audit`/Semgrep — a clean verdict is not proof of safety. Read
+`references/vetting-inbound.md`; adopt only after understanding any flagged item, and prefer
+`npm install --ignore-scripts`.
+
+### `harden` — audit the real destructive-capability surface
+
+Read-only. The honest thesis: the repo-guard (below) is **defense-in-depth — a LOCAL BRAKE**
+that catches interactive/PATH-resolved destruction but is **bypassed by absolute-path `gh` and
+the REST API** (curl/octokit). It reduces accidental/automated risk; it does **not** guarantee
+prevention. TRUE prevention of the repo-destruction / star-loss class is **capability removal at
+GitHub**: a token without `delete_repo` literally cannot delete/transfer regardless of any
+bypass, plus org deletion/transfer restrictions and branch protection. This verb **audits and
+guides** those; **you apply** the GitHub-side changes (the skill never changes your token or org
+settings).
+
+```sh
+scripts/harden-check.sh                 # full audit (token scope, org, branch protection)
+scripts/harden-check.sh --offline       # token scope + local guard only, no network
+scripts/harden-check.sh --org your-org --repos owner/repo-a,owner/repo-b
+scripts/harden-check.sh --auth-status-file gh-status.txt   # offline scope check from a capture
+```
+
+Exits nonzero on any HIGH exposure (usable as a gate), but **the report is the value**. A
+`delete_repo`-scoped token is an OPEN HIGH item and is never hidden. Full layered model, the
+minimal automation-token recipe, and the exact Settings URLs:
+`references/destructive-ops-prevention.md`.
 
 ### `scan-content` — untrusted-content tripwire (KNOWN patterns only)
 
@@ -126,8 +180,13 @@ scripts/repo-guard-install.sh --uninstall     # remove shim + hook
    cross-file dropper — this is documented, not hidden.
 2. **Precision over recall.** A noisy gate gets disabled. Never flag a lone `eval`, a lone
    base64 blob, a lone config, or a lone hook. Require capability + indicator co-occurrence.
-3. **Confirm the exact target.** Destructive repo ops require naming the specific
-   `owner/repo` — a blanket "are you sure?" trains reflexive approval.
+3. **Confirm the exact target — and know the guard is a brake, not prevention.** Destructive
+   repo ops require naming the specific `owner/repo` (a blanket "are you sure?" trains reflexive
+   approval). But be honest about enforcement: repo-guard is a **local, bypassable brake**
+   (absolute-path `gh`/curl skip it). **Durable prevention is capability removal at GitHub** — a
+   token without `delete_repo` + org deletion/transfer restrictions + branch protection. Run
+   `harden` to audit that surface; the fixes are yours to apply. See
+   `references/destructive-ops-prevention.md`.
 4. **Private markers stay local.** The scanner ships generic detection only. Your private
    names are a local-config concern (`private-markers.txt`), never shipped.
 5. **Untrusted-content handling is a behavioral contract, not a scanner.** `scan-content.sh`
@@ -140,6 +199,8 @@ scripts/repo-guard-install.sh --uninstall     # remove shim + hook
 
 ```sh
 bash tests/test-scan.sh          # leak/dropper scanner fixtures (dropper/secret/clean/allow/markers/unicode)
+bash tests/test-vet.sh           # inbound vetting fixtures (poisoned template → REJECT, clean → ADOPT)
+bash tests/test-harden.sh        # harden-check scope-parsing (mock gh auth status, offline)
 bash tests/test-scan-content.sh  # untrusted-content tripwire fixtures (positive per class + benign negatives)
 bash tests/test-guard.sh         # guard fixtures — offline, fake gh, no real GitHub call
 bash tests/self-scan.sh          # this repo is clean under its own leak/dropper scanner

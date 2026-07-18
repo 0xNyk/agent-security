@@ -13,6 +13,17 @@
 #   'An exec \*\*sink\*\*'  → coverage-and-limits.md class table (names the sink tokens)
 #   '\*\*Sink\*\*'          → threat-model.md axis table (the Sink row)
 #   'Personal home paths'   → coverage-and-limits.md PATH-class row (a /Users/<name> EXAMPLE)
+#
+# The inbound-vetting layer adds a few more inert defensive-EXAMPLE lines: the
+# starter-template decode-then-exec dropper shape appears verbatim in the vet tool's
+# header comment, the vetting-inbound case study, and the vet test's synthetic poisoned
+# fixture. Each is documentation / an inert test fixture, never a runnable payload, so
+# each is allowed here by an exact substring:
+#   'starter template carrying an atob'          → vet-incoming.sh header comment
+#   'decoding a base64 URL, feeding'             → vetting-inbound.md case study
+#   'POISONED template: install-time postinstall'→ test-vet.sh fixture banner
+#   'const u = atob\(process\.env\.CFG_URL'      → test-vet.sh synthetic vite-config fixture
+#   'eval\(await \(await fetch\(u\)\)\.text'     → test-vet.sh synthetic vite-config fixture
 # If any OTHER finding appears, this exits non-zero — the allow-list is intentionally tight.
 set -euo pipefail
 
@@ -21,4 +32,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 exec bash "$ROOT/scripts/scan-repo.sh" --all --markers /dev/null \
   --allow 'An exec \*\*sink\*\*' \
   --allow '\*\*Sink\*\*' \
-  --allow 'Personal home paths'
+  --allow 'Personal home paths' \
+  --allow 'starter template carrying an atob' \
+  --allow 'decoding a base64 URL, feeding' \
+  --allow 'POISONED template: install-time postinstall' \
+  --allow 'const u = atob\(process\.env\.CFG_URL' \
+  --allow 'eval\(await \(await fetch\(u\)\)\.text'

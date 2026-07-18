@@ -22,6 +22,12 @@ jobs:
       - name: Scanner fixture tests
         run: bash tests/test-scan.sh
 
+      - name: Inbound-vetting fixture tests (poisoned template -> REJECT)
+        run: bash tests/test-vet.sh
+
+      - name: Harden-check scope-parsing tests (offline, mock gh auth status)
+        run: bash tests/test-harden.sh
+
       - name: Untrusted-content scanner fixture tests
         run: bash tests/test-scan-content.sh
 

@@ -92,6 +92,42 @@ secret, no marker, no real personal data, and no invisible-unicode is ever allow
 
 ---
 
+## `vet-incoming.sh` — the inbound supply-chain gate
+
+`scan-repo.sh` gates content **leaving** for a public repo. `vet-incoming.sh` gates content
+**arriving** — a third-party template, package, plugin, or skill you are about to adopt. It runs
+the same dropper/secret/invisible-unicode engine over a temp copy of the target (**scan only —
+it never runs install/build/postinstall**) plus adoption-specific checks, and emits an **ADOPT /
+REVIEW / REJECT** verdict.
+
+### What it flags (beyond the shared engine)
+
+| Class | Tier | What it flags |
+|---|---|---|
+| Lifecycle scripts | HIGH | `preinstall`/`install`/`postinstall`/`prepare`/`prepublish` in any `package.json` — arbitrary code on `npm/pnpm install` (the postinstall attack). |
+| Config-file dropper | CRITICAL | A dynamic-exec sink or base64/hex decoder co-occurring with a network fetcher or an environment-variable read, inside a build/test/config file (`vite`/`vitest`/`webpack`/`rollup`/`jest`/`*.config.*`, test setup) — the starter-template vector. Also a base64 blob under an env key in a committed `.env*`. |
+| Committed git hooks | HIGH/MED | `.husky/*` hooks; scripts that set `core.hooksPath` or write `.git/hooks`. |
+| CI workflow | HIGH/MED | `curl\|bash`, net→interpreter pipes, `eval`, `node -e`; secret-with-network exfil shapes; unpinned/mutable action refs (`uses: x@main`). |
+| Editor autorun | HIGH/MED | `.vscode/tasks.json` `runOn: folderOpen`; devcontainer `postCreate/postStart` commands. |
+| Obfuscated/minified | MED | Long/minified lines carrying an exec sink; vendored `*.min.js` flagged as opaque. |
+
+Verdict: **REJECT** (any CRITICAL/HIGH, exit 1) · **REVIEW** (MEDIUM or a scan-repo MAJOR) ·
+**ADOPT** (nothing matched, exit 0).
+
+### What it does NOT catch — the honest boundaries
+
+- **KNOWN patterns only, trivially evadable** — the same evasion story as `scan-repo.sh`
+  (rename/encode/translate/split/minify), and the same **same-file** limitation for cross-file
+  droppers.
+- **Not a replacement** for Socket / Snyk / `npm audit` (registry & dependency graph), Semgrep /
+  CodeQL (dataflow taint), or sandbox detonation with egress observation.
+- **A clean ADOPT is not proof of safety** — it means no known adoption red flag matched. Read the
+  code, prefer `npm install --ignore-scripts`, and detonate high-value inbound code in a sandbox.
+- **Scan-only cannot see a runtime-only payload** — which is exactly why the rule is *vet before
+  install*, not *install then watch*. Full contract + case study: `references/vetting-inbound.md`.
+
+---
+
 ## `scan-content.sh` — the untrusted-content tripwire
 
 **Prompt injection is an unsolved problem.** This tool does not solve it. It **reduces** risk
@@ -192,10 +228,17 @@ primary automation threat. A determined human can always call the real binary di
 guard targets **accidental / automated** destruction, not a determined operator. `curl`
 against the REST API is likewise out of scope (it never touches `gh`).
 
-**What it is not.** It is not GitHub org-level protection, not a branch/tag protection rule,
-not a permissions boundary on the token itself. For durable protection, also set
-organization repository-deletion restrictions and least-privilege tokens. This guard is a
-**local, per-machine, per-invocation** brake, not a server-side policy.
+**What it is not — the load-bearing honest line.** It is not GitHub org-level protection, not a
+branch/tag protection rule, not a permissions boundary on the token itself. It is a **local,
+per-machine, per-invocation brake** — it REDUCES accidental/automated destruction risk; it does
+**not** guarantee prevention (absolute-path `gh` and the REST API bypass it). **TRUE prevention
+is capability removal at GitHub:** a token without `delete_repo` literally cannot delete/transfer
+regardless of any bypass, plus org deletion/transfer restrictions and branch protection. Audit
+that surface with `scripts/harden-check.sh` (verb `harden`) and read the full layered model — L1
+guard, L2 token scope, L3 org policy, L4 branch protection, L5 recovery — with the minimal
+automation-token recipe and exact Settings URLs in `references/destructive-ops-prevention.md`.
+The GitHub-side fixes are the operator's to apply; the skill audits and guides, it never changes
+your token or org settings.
 
 ### Logs
 
