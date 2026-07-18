@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # repo-guard-install.sh — install / inspect / remove the repo-lifecycle guard.
 #
-# The guard makes DESTRUCTIVE GitHub repo operations (delete / rename / transfer /
-# privatize / archive) require an explicit per-repo human confirmation. It has two
-# path-agnostic layers:
+# The guard makes DESTRUCTIVE GitHub repo operations require explicit per-repo human
+# confirmation, on a TWO-TIER model:
+#   TIER 1 (single confirm) — rename / archive / edit --visibility private|internal:
+#     recoverable, so they need only REPO_LIFECYCLE_OK=<owner/repo>.
+#   TIER 2 (TRIPLE confirm) — delete / transfer (the irreversible, star-destroying
+#     ops): require ALL THREE of REPO_LIFECYCLE_OK=<owner/repo>,
+#     REPO_DESTROY_CONFIRM=<owner/repo>, and a matching line in the single-use file
+#     ~/.local/state/repo-guard/CONFIRM-DESTROY (consumed on success). Any missing
+#     factor blocks. This is a strong LOCAL brake, not an absolute block — see the
+#     coverage/limits doc; the categorical block on delete/transfer is a token without
+#     the delete_repo scope.
+# It has two path-agnostic layers:
 #   L1  PATH shim   — a `gh` wrapper installed ahead of the real gh on PATH.
 #   L3  Claude hook — a PreToolUse (Bash) hook that also catches gh called by
 #                     ABSOLUTE path inside a Claude Code session (the shim's blind
@@ -229,5 +238,9 @@ fi
 echo
 echo "Verify with: $0 --status"
 echo "Test (dry, non-destructive): gh repo view   # should pass through normally"
+echo "TIER 1 (rename/archive/privatize): REPO_LIFECYCLE_OK=<owner/repo> gh repo archive <owner/repo>"
+echo "TIER 2 (delete/transfer) needs ALL THREE:"
+echo "  printf '%s\\n' '<owner/repo>' >> \"\${REPO_GUARD_STATE:-\$HOME/.local/state/repo-guard}/CONFIRM-DESTROY\""
+echo "  REPO_LIFECYCLE_OK=<owner/repo> REPO_DESTROY_CONFIRM=<owner/repo> gh repo delete <owner/repo> --yes"
 echo "Removal:     $0 --uninstall"
 exit 0

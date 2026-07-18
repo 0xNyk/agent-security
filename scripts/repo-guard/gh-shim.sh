@@ -200,14 +200,106 @@ allow_note() {
 }
 
 # ----------------------------------------------------------------------------
+# 3b. TIER-2 triple-confirmation gate (for the IRREVERSIBLE ops: delete/transfer).
+#     ALL THREE independent factors must name the SAME owner/repo, or we block:
+#       (1) REPO_LIFECYCLE_OK=<owner/repo>     env  (names the exact repo)
+#       (2) REPO_DESTROY_CONFIRM=<owner/repo>  env  (a 2nd deliberate re-type)
+#       (3) a line == <owner/repo> in the single-use CONFIRM-DESTROY file
+#     On a successful pass the matching file line is REMOVED (single-use: a
+#     second delete needs a fresh confirmation). TIER-1 ops are left untouched.
+# ----------------------------------------------------------------------------
+confirm_file="$logdir/CONFIRM-DESTROY"
+
+confirm_file_has_line() {  # target -> 0 if a line == target exists
+  [ -f "$confirm_file" ] || return 1
+  grep -qxF -- "$1" "$confirm_file" 2>/dev/null
+}
+
+confirm_file_consume() {   # target -> remove the FIRST matching line (single-use)
+  local want="$1" tmp
+  [ -f "$confirm_file" ] || return 0
+  tmp="$(mktemp "${confirm_file}.XXXXXX" 2>/dev/null)" || return 1
+  awk -v w="$want" 'BEGIN{c=0}{ if(c==0 && $0==w){c=1; next} print }' "$confirm_file" >"$tmp" 2>/dev/null \
+    && mv "$tmp" "$confirm_file" 2>/dev/null
+  chmod 600 "$confirm_file" 2>/dev/null || true
+  rm -f "$tmp" 2>/dev/null || true
+}
+
+# Sets MISSING to the space-separated factors that are absent (empty => all present).
+MISSING=""
+tier2_check() {  # target -> 0 only if all three factors name this exact repo
+  local target="$1"
+  MISSING=""
+  overridden "$target"                          || MISSING="${MISSING}LIFECYCLE "
+  [ "${REPO_DESTROY_CONFIRM:-}" = "$target" ]   || MISSING="${MISSING}DESTROY "
+  confirm_file_has_line "$target"               || MISSING="${MISSING}FILE "
+  [ -z "$MISSING" ]
+}
+
+block2() {  # what target -- TIER-2 block: lists exactly which factors are missing
+  local what="$1" target="$2"
+  tier2_check "$target" || true
+  mkdir -p "$logdir" 2>/dev/null && chmod 700 "$logdir" 2>/dev/null
+  {
+    printf '%s\tSHIM\tBLOCKED-TIER2\twhat=%s\ttarget=%s\tmissing=%s\tpwd=%s\targv=' \
+      "$(date -u +%FT%TZ)" "$what" "$target" "${MISSING:-none}" "$PWD"
+    printf '%q ' "${ALL[@]}"
+    printf '\n'
+  } >> "$logdir/blocked.log" 2>/dev/null
+  {
+    echo "==================================================================="
+    echo "repo-guard: BLOCKED a TIER-2 (IRREVERSIBLE) repository operation."
+    echo "  what   : $what"
+    echo "  repo   : $target"
+    echo "  via    : gh ${ALL[*]}"
+    echo
+    echo "delete/transfer is IRREVERSIBLE -- it destroys stars, forks, issues and"
+    echo "history. It requires TRIPLE, independent confirmation; ALL THREE must"
+    echo "name the SAME repo. Missing factor(s):"
+    echo
+    case " $MISSING " in *" LIFECYCLE "*)
+      echo "  [ ] 1. REPO_LIFECYCLE_OK=$target        (env -- names the exact repo)" ;;
+    esac
+    case " $MISSING " in *" DESTROY "*)
+      echo "  [ ] 2. REPO_DESTROY_CONFIRM=$target     (env -- re-type the exact repo)" ;;
+    esac
+    case " $MISSING " in *" FILE "*)
+      echo "  [ ] 3. a line '$target' in $confirm_file"
+      echo "         add it: printf '%s\\n' '$target' >> $confirm_file" ;;
+    esac
+    echo
+    if [ "$target" = "UNKNOWN" ]; then
+      echo "NOTE: the target repo could not be determined (e.g. via graphql). Re-run"
+      echo "      the explicit form  gh repo delete <owner/repo>  so the guard can"
+      echo "      name the repo and you can supply the three factors."
+    else
+      echo "Full recipe (all three name the same repo; file line consumed on success):"
+      echo "  printf '%s\\n' '$target' >> $confirm_file"
+      echo "  REPO_LIFECYCLE_OK=$target REPO_DESTROY_CONFIRM=$target gh ${ALL[*]}"
+    fi
+    echo
+    echo "No API call was made. Logged to: $logdir/blocked.log"
+    echo
+    echo "HONEST LIMIT: this is a strong LOCAL brake, not an absolute block. An"
+    echo "absolute-path gh outside a Claude session and curl/octokit against the REST"
+    echo "API still bypass it. The only CATEGORICAL block on delete/transfer is an"
+    echo "auth token WITHOUT the delete_repo scope. Triple-confirm != unbypassable."
+    echo "==================================================================="
+  } >&2
+  exit 1
+}
+
+# ----------------------------------------------------------------------------
 # 4. gh repo <delete|rename|archive|transfer|edit>
+#    TIER 2 (triple-confirm): delete, transfer.  TIER 1 (single REPO_LIFECYCLE_OK):
+#    rename, archive, edit --visibility private|internal.
 # ----------------------------------------------------------------------------
 if [ "$sub1" = "repo" ]; then
-  what=""; target=""
+  what=""; target=""; tier=1
   case "$sub2" in
-    delete)   what="repo delete";   target="$(resolve_target "$pos2")" ;;
+    delete)   what="repo delete";   target="$(resolve_target "$pos2")"; tier=2 ;;
+    transfer) what="repo transfer"; target="$(resolve_target "$pos2")"; tier=2 ;;
     archive)  what="repo archive";  target="$(resolve_target "$pos2")" ;;
-    transfer) what="repo transfer"; target="$(resolve_target "$pos2")" ;;
     rename)   what="repo rename";   target="$(resolve_target "")"     ;;  # pos2 is the NEW name
     edit)
       case "$vis" in
@@ -217,6 +309,12 @@ if [ "$sub1" = "repo" ]; then
       ;;
     *) exec "$real_gh" "$@" ;;       # create/list/clone/view/fork/sync/unarchive...
   esac
+  if [ "$tier" = 2 ]; then
+    if tier2_check "$target"; then
+      confirm_file_consume "$target"; allow_note "TIER2 $what" "$target"; exec "$real_gh" "$@"
+    fi
+    block2 "$what" "$target"
+  fi
   if overridden "$target"; then allow_note "$what" "$target"; exec "$real_gh" "$@"; fi
   block "$what" "$target"
 fi
@@ -251,12 +349,14 @@ if [ "$sub1" = "api" ]; then
   if [ "$graphql" -eq 1 ]; then
     for ((i=1;i<n;i++)); do
       case "${ALL[$i]}" in
-        *deleteRepository*|*archiveRepository*)
-          block "repo destruction via graphql" "UNKNOWN" ;;
+        *deleteRepository*)
+          block2 "repo delete via graphql" "UNKNOWN" ;;   # TIER 2 (unknown target -> cannot satisfy)
+        *archiveRepository*)
+          block "repo archive via graphql" "UNKNOWN" ;;    # TIER 1
         *updateRepository*)
           case "${ALL[$i]}" in
             *[Vv]isibility*PRIVATE*|*[Vv]isibility*INTERNAL*|*private*true*)
-              block "repo privatize via graphql" "UNKNOWN" ;;
+              block "repo privatize via graphql" "UNKNOWN" ;;  # TIER 1
           esac ;;
       esac
     done
@@ -277,19 +377,27 @@ if [ "$sub1" = "api" ]; then
   p="${p#/}"           # strip leading slash
 
   if [ -n "$p" ]; then
-    # Transfer: any method on /repos/OWNER/REPO/transfer
+    # Transfer: any method on /repos/OWNER/REPO/transfer  -- TIER 2 (triple-confirm).
     if [[ "$p" =~ ^repos/[^/]+/[^/]+/transfer$ ]]; then
       target="$(printf '%s' "$p" | sed -E 's#^repos/([^/]+/[^/]+)/transfer$#\1#')"
-      if overridden "$target"; then allow_note "api repo transfer" "$target"; exec "$real_gh" "$@"; fi
-      block "repo transfer via gh api" "$target"
+      if tier2_check "$target"; then
+        confirm_file_consume "$target"; allow_note "TIER2 api repo transfer" "$target"; exec "$real_gh" "$@"
+      fi
+      block2 "repo transfer via gh api" "$target"
     fi
     # Repo root: /repos/OWNER/REPO  (delete / rename / privatize / archive)
     if [[ "$p" =~ ^repos/[^/]+/[^/]+$ ]]; then
       target="${p#repos/}"
-      danger=""
+      # TIER 2: DELETE /repos/OWNER/REPO is an irreversible repo delete.
       if [ "$method" = "DELETE" ]; then
-        danger="repo delete via gh api"
-      elif [ "$method" = "PATCH" ] || [ "$method" = "PUT" ] || \
+        if tier2_check "$target"; then
+          confirm_file_consume "$target"; allow_note "TIER2 repo delete via gh api" "$target"; exec "$real_gh" "$@"
+        fi
+        block2 "repo delete via gh api" "$target"
+      fi
+      # TIER 1: PATCH/PUT (or fields) that rename / privatize / archive the repo.
+      danger=""
+      if [ "$method" = "PATCH" ] || [ "$method" = "PUT" ] || \
            { [ "$has_fields" -eq 1 ] && { [ "$method" = "POST" ] || [ "$method" = "GET" ]; }; }; then
         # PATCH/PUT to repo root, or fields present (gh defaults to POST):
         # dangerous only if it changes name/visibility/archived/private.

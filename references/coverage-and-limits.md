@@ -181,12 +181,23 @@ tripwire on top of that contract — never as a substitute for it.
 
 ## repo-guard — the repository-lifecycle guard
 
-### What it blocks (repo-LEVEL destruction only)
+### What it blocks (repo-LEVEL destruction only), on a two-tier model
 
 `gh repo delete` · `rename` · `transfer` · `archive` · `edit --visibility private|internal`;
 `gh api` `DELETE`/`PATCH` on `/repos/OWNER/REPO` that changes `name`/`visibility`/`archived`/
 `private`; `gh api …/repos/O/R/transfer`; and graphql `deleteRepository` /
 `archiveRepository` / `updateRepository→private`.
+
+These split into two confirmation tiers by recoverability:
+
+- **TIER 2 (TRIPLE confirmation)** — the irreversible, star-destroying ops: **`delete` and
+  `transfer`** (plus the `gh api` `DELETE /repos/O/R`, `…/transfer`, and graphql
+  `deleteRepository` equivalents). A completed delete/transfer is not recoverable from this
+  machine, so it requires **all three** independent factors below, each naming the same repo.
+- **TIER 1 (single confirmation)** — the recoverable ops: **`rename`, `archive`,
+  `edit --visibility private|internal`** (plus the `gh api` PATCH mutate and graphql
+  archive/privatize equivalents). These need only the single `REPO_LIFECYCLE_OK` factor;
+  they are not over-gated.
 
 ### What it deliberately does NOT block (passes through unchanged)
 
@@ -200,16 +211,34 @@ tripwire on top of that contract — never as a substitute for it.
 
 ### The override (human-in-the-loop)
 
-Name the exact target repo in `REPO_LIFECYCLE_OK`:
+**TIER 1** — name the exact target repo in `REPO_LIFECYCLE_OK`:
 
 ```sh
-REPO_LIFECYCLE_OK=owner/repo gh repo delete owner/repo --yes
+REPO_LIFECYCLE_OK=owner/repo gh repo archive owner/repo
 ```
 
 Accepted forms: `REPO_LIFECYCLE_OK=owner/repo`, or the token
 `REPO_LIFECYCLE_OK=--yes-destroy-owner/repo` / `--yes-destroy-<repo-name>`. **The override
 must match the repo actually being operated on**, or it still blocks — a mis-targeted
 automation cannot satisfy the gate for the wrong repository.
+
+**TIER 2** (delete / transfer) — all three factors, each naming the **same** `owner/repo`;
+any missing factor blocks and the message names which:
+
+```sh
+printf '%s\n' 'owner/repo' >> ~/.local/state/repo-guard/CONFIRM-DESTROY   # single-use line
+REPO_LIFECYCLE_OK=owner/repo REPO_DESTROY_CONFIRM=owner/repo gh repo delete owner/repo --yes
+```
+
+1. `REPO_LIFECYCLE_OK=<owner/repo>` (env) · 2. `REPO_DESTROY_CONFIRM=<owner/repo>` (env, a
+second deliberate re-type under a different variable) · 3. a line == `<owner/repo>` in the
+single-use file `~/.local/state/repo-guard/CONFIRM-DESTROY`, which the guard **removes on a
+successful pass** (a second delete needs a fresh line). A graphql `deleteRepository` cannot
+name a concrete repo and so can never satisfy the three factors — use the explicit
+`gh repo delete <owner/repo>` form. **Triple-confirm is a stronger local brake, not an
+absolute block:** absolute-path `gh` outside a Claude session and `curl`/octokit REST still
+bypass it; the only categorical block on delete/transfer is a token without `delete_repo`
+(see the honest line below).
 
 ### Honest coverage / bypass matrix
 

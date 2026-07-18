@@ -23,7 +23,14 @@
 set -uo pipefail
 input=$(cat)
 
-verdict=$(printf '%s' "$input" | REPO_LIFECYCLE_OK_ENV="${REPO_LIFECYCLE_OK:-}" python3 -c '
+logdir="${REPO_GUARD_STATE:-$HOME/.local/state/repo-guard}"
+confirm_file="$logdir/CONFIRM-DESTROY"
+
+verdict=$(printf '%s' "$input" \
+  | REPO_LIFECYCLE_OK_ENV="${REPO_LIFECYCLE_OK:-}" \
+    REPO_DESTROY_CONFIRM_ENV="${REPO_DESTROY_CONFIRM:-}" \
+    CONFIRM_FILE_ENV="$confirm_file" \
+    python3 -c '
 import sys, json, re, shlex, os
 
 def out(s):
@@ -43,6 +50,8 @@ if not cmd.strip():
     out("OK")
 
 env_override = os.environ.get("REPO_LIFECYCLE_OK_ENV", "")
+env_destroy = os.environ.get("REPO_DESTROY_CONFIRM_ENV", "")
+confirm_file = os.environ.get("CONFIRM_FILE_ENV", "")
 
 def is_gh(tok):
     return tok == "gh" or tok.endswith("/gh")
@@ -83,6 +92,57 @@ def overridden(target, inline_env):
             return True
     return False
 
+def tier_of(what):
+    # TIER 2 = IRREVERSIBLE (delete/transfer, incl. api/graphql). All else TIER 1.
+    return 2 if ("delete" in what or "transfer" in what) else 1
+
+def confirm_file_has_line(target):
+    if not confirm_file or not os.path.isfile(confirm_file):
+        return False
+    try:
+        with open(confirm_file) as f:
+            for line in f:
+                if line.rstrip("\n") == target:
+                    return True
+    except Exception:
+        return False
+    return False
+
+def confirm_file_consume(target):
+    # Remove the FIRST line == target (single-use). Best-effort.
+    if not confirm_file or not os.path.isfile(confirm_file):
+        return
+    try:
+        with open(confirm_file) as f:
+            lines = f.readlines()
+        kept, removed = [], False
+        for line in lines:
+            if not removed and line.rstrip("\n") == target:
+                removed = True
+                continue
+            kept.append(line)
+        tmp = confirm_file + ".tmp"
+        with open(tmp, "w") as f:
+            f.writelines(kept)
+        os.replace(tmp, confirm_file)
+        try:
+            os.chmod(confirm_file, 0o600)
+        except Exception:
+            pass
+    except Exception:
+        pass
+
+def tier2_missing(target, inline_env, inline_destroy):
+    """Return the list of absent factors (empty => all three present)."""
+    missing = []
+    if not overridden(target, inline_env):
+        missing.append("LIFECYCLE")
+    if not (target and (inline_destroy == target or env_destroy == target)):
+        missing.append("DESTROY")
+    if not confirm_file_has_line(target):
+        missing.append("FILE")
+    return missing
+
 # Split the command into segments; analyse each one that invokes gh.
 segments = re.split(r"\|\||&&|\||;|\n|&", cmd)
 for seg in segments:
@@ -96,14 +156,19 @@ for seg in segments:
     if not toks:
         continue
 
-    # inline REPO_LIFECYCLE_OK=... env assignment (leading, before gh)
+    # inline VAR=... env assignments (leading, before gh) + is gh invoked by path?
     inline_env = ""
+    inline_destroy = ""
     gh_idx = -1
+    gh_is_path = False
     for i, t in enumerate(toks):
         if t.startswith("REPO_LIFECYCLE_OK="):
             inline_env = t.split("=", 1)[1]
+        if t.startswith("REPO_DESTROY_CONFIRM="):
+            inline_destroy = t.split("=", 1)[1]
         if is_gh(t):
             gh_idx = i
+            gh_is_path = (t != "gh")   # absolute/relative path => the PATH shim will NOT run
             break
     if gh_idx < 0:
         continue
@@ -151,10 +216,12 @@ for seg in segments:
         # graphql light check
         if "graphql" in gargs:
             joined = " ".join(gargs)
-            if re.search(r"deleteRepository|archiveRepository", joined):
-                what = "repo destruction via graphql"; target = "UNKNOWN"
+            if re.search(r"deleteRepository", joined):
+                what = "repo delete via graphql"; target = "UNKNOWN"       # TIER 2
+            elif re.search(r"archiveRepository", joined):
+                what = "repo archive via graphql"; target = "UNKNOWN"      # TIER 1
             elif re.search(r"updateRepository", joined) and re.search(r"visibility.*(PRIVATE|INTERNAL)|private[\x27\"]?\s*:\s*true", joined, re.I):
-                what = "repo privatize via graphql"; target = "UNKNOWN"
+                what = "repo privatize via graphql"; target = "UNKNOWN"    # TIER 1
             else:
                 continue
         else:
@@ -195,18 +262,58 @@ for seg in segments:
         continue
 
     if what:
-        if overridden(target, inline_env):
-            continue
-        out("BLOCK\t" + what + "\t" + target)
+        if tier_of(what) == 2:
+            missing = tier2_missing(target, inline_env, inline_destroy)
+            if not missing:
+                # Allow. Consume the single-use line ONLY when gh is invoked by an
+                # absolute/relative path here (the PATH shim will NOT run to consume
+                # it). For a bare `gh`, the shim runs next and consumes it instead.
+                if gh_is_path:
+                    confirm_file_consume(target)
+                continue
+            out("BLOCK2\t" + what + "\t" + target + "\t" + ",".join(missing))
+        else:
+            if overridden(target, inline_env):
+                continue
+            out("BLOCK\t" + what + "\t" + target)
 
 out("OK")
 ')
 
-if [[ "$verdict" == BLOCK* ]]; then
+if [[ "$verdict" == BLOCK2$'\t'* ]]; then
+  rest="${verdict#BLOCK2$'\t'}"
+  what="${rest%%$'\t'*}"
+  rest2="${rest#*$'\t'}"
+  target="${rest2%%$'\t'*}"
+  missing="${rest2##*$'\t'}"
+  mkdir -p "$logdir" 2>/dev/null && chmod 700 "$logdir" 2>/dev/null
+  printf '%s\tHOOK\tBLOCKED-TIER2\twhat=%s\ttarget=%s\tmissing=%s\n' "$(date -u +%FT%TZ)" "$what" "$target" "$missing" >> "$logdir/blocked.log" 2>/dev/null
+  {
+    echo "BLOCKED by repo-guard hook: TIER-2 ${what} (repo: ${target})."
+    echo "This is an IRREVERSIBLE repo operation (delete/transfer). No API call was made."
+    echo "It requires TRIPLE, independent confirmation naming the SAME repo. Missing:"
+    case ",$missing," in *,LIFECYCLE,*) echo "  [ ] 1. REPO_LIFECYCLE_OK=${target}    (env)";; esac
+    case ",$missing," in *,DESTROY,*)   echo "  [ ] 2. REPO_DESTROY_CONFIRM=${target} (env, re-type the repo)";; esac
+    case ",$missing," in *,FILE,*)      echo "  [ ] 3. printf '%s\\n' '${target}' >> ${confirm_file}";; esac
+    if [ "$target" = "UNKNOWN" ] || [ "$target" = "-" ]; then
+      echo "  (target unknown, e.g. graphql -- use the explicit 'gh repo delete <owner/repo>' form)"
+    else
+      echo "Full recipe (all three, same repo; the file line is consumed on success):"
+      echo "  printf '%s\\n' '${target}' >> ${confirm_file}"
+      echo "  REPO_LIFECYCLE_OK=${target} REPO_DESTROY_CONFIRM=${target} <your gh command>"
+    fi
+    echo "HONEST LIMIT: strong LOCAL brake, not an absolute block. Absolute-path gh"
+    echo "outside a Claude session and curl/octokit REST bypass it; only an auth token"
+    echo "WITHOUT the delete_repo scope categorically blocks delete/transfer."
+    echo "See the repo-guard section of references/coverage-and-limits.md for the full policy."
+  } >&2
+  exit 2
+fi
+
+if [[ "$verdict" == BLOCK$'\t'* ]]; then
   rest="${verdict#BLOCK$'\t'}"
   what="${rest%%$'\t'*}"
   target="${rest##*$'\t'}"
-  logdir="${REPO_GUARD_STATE:-$HOME/.local/state/repo-guard}"
   mkdir -p "$logdir" 2>/dev/null && chmod 700 "$logdir" 2>/dev/null
   printf '%s\tHOOK\tBLOCKED\twhat=%s\ttarget=%s\n' "$(date -u +%FT%TZ)" "$what" "$target" >> "$logdir/blocked.log" 2>/dev/null
   {
