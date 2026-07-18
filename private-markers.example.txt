@@ -1,0 +1,45 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# agent-security — PRIVATE MARKERS (EXAMPLE TEMPLATE)
+#
+# This file lists YOUR private, project-specific strings that must never leak into
+# a public repository — internal repo/venture/product names, private path fragments.
+# The generic scanner CANNOT know these; only you can.
+#
+# HOW TO USE
+#   1. Copy this file to your local config (OUTSIDE any repo you publish):
+#        mkdir -p ~/.config/agent-security
+#        cp private-markers.example.txt ~/.config/agent-security/private-markers.txt
+#        chmod 600 ~/.config/agent-security/private-markers.txt
+#   2. Replace the PLACEHOLDER values below with your real private names.
+#   3. The scanner auto-discovers ~/.config/agent-security/private-markers.txt
+#      (or set $AGENT_SECURITY_MARKERS, or pass --markers <file>).
+#
+# THIS FILE IS GIT-IGNORED AND NEVER SHIPPED. Only the *.example.txt template is
+# public. Do NOT put real markers in the .example file. Do NOT commit your real
+# private-markers.txt. Everything below is an OBVIOUS placeholder — replace it all.
+#
+# FORMAT: section headers in [brackets]; one fixed string per line; # starts a
+# comment. Matching is literal (fixed-string), case-sensitive.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[names]
+# Internal repo / venture / product / org names that must not appear publicly.
+# Replace these placeholders with YOUR real private names.
+acme-corp
+example-venture
+project-bluebird
+internal-widget-service
+
+[paths]
+# Private filesystem path fragments (home dirs, internal mount points, data roots).
+# Replace with YOUR real private path fragments.
+/Users/you
+/home/you
+/data/acme-corp
+/srv/internal
+
+[public]
+# Repositories you KNOW are already public — used only by `scan-repo.sh --public-only`
+# to decide whether to scan when gh visibility is unavailable. One repo NAME per line.
+my-public-tool
+another-open-repo

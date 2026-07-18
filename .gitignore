@@ -1,0 +1,17 @@
+# Local, user-owned private markers — NEVER commit these.
+private-markers.txt
+**/private-markers.txt
+.config/agent-security/
+
+# repo-guard local state / logs
+.local/state/repo-guard/
+blocked.log
+
+# OS / editor noise
+.DS_Store
+*.swp
+*~
+
+# scratch
+*.tmp
+/tmp/
