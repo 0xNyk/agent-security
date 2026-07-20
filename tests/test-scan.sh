@@ -139,7 +139,14 @@ run_expect "fetch without an exec sink stays clean" "$R" 0 --all
 
 # 8) Base64 blob under an env-var key in a committed .env; .env.example exempt.
 R="$TMP/envfile"; new_repo "$R"
-printf 'SYNTHETIC_CARRIER=synthetic-fixture-redacted=\n' >"$R/.env"
+# Assemble the inert example.invalid carrier at runtime. Keeping the full
+# high-entropy value out of Git avoids training generic secret scanners to
+# ignore credential-shaped fixtures while preserving this detector test.
+fixture_key_prefix='AUTH_'
+fixture_key_suffix='API_KEY'
+fixture_value_a='aHR0cHM6Ly9leGFtcGxl'
+fixture_value_b='LmludmFsaWQvcGF5bG9hZC5qcw=='
+printf '%s%s=%s%s\n' "$fixture_key_prefix" "$fixture_key_suffix" "$fixture_value_a" "$fixture_value_b" >"$R/.env"
 printf 'SYNTHETIC_CARRIER=your-key-here\n' >"$R/.env.example"
 git -C "$R" add -A -f
 run_expect "committed .env base64 blob fails" "$R" 1 --all

@@ -1,13 +1,13 @@
 # Releasing
 
-This project is defensive tooling — the release gate is **proof that the repo is clean**,
+This project is defensive tooling. The release gate is **proof that the repo is clean**,
 not a version bump. Run every step from the repo root before publishing.
 
 ## Pre-publish checklist
 
-1. **Version consistency** — `SKILL.md` frontmatter `version` matches the target tag and
+1. **Version consistency:** `SKILL.md` frontmatter `version` matches the target tag and
    the top `CHANGELOG.md` entry.
-2. **Sanitization gate (blocker)** — the repo must be clean under its own scanner:
+2. **Sanitization gate (blocker):** the repo must be clean under its own scanner:
    ```sh
    bash tests/self-scan.sh        # must print CLEAN
    ```
@@ -20,14 +20,23 @@ not a version bump. Run every step from the repo root before publishing.
      bash "tests/$t.sh" || { echo "FAILED: $t"; exit 1; }
    done
    ```
-4. **CI mirrors the above** — `.github/workflows/ci.yml` runs all six suites offline,
+4. **CI mirrors the above:** `.github/workflows/ci.yml` runs all six suites offline,
    with GitHub Actions pinned to full commit SHAs.
+5. **Independent secret-history scan:**
+   ```sh
+   gitleaks git --no-banner --redact .
+   ```
+   Review every allowlist entry. An allowlist needs an exact commit, path, value shape,
+   and written reason proving the material is synthetic.
+6. **Repository metadata check:** inspect commit author/committer identities, image
+   metadata, remotes, issue links, and release artifacts. Confirm every published identity
+   and contact route is intentional.
 
 ## Publish
 
 ```sh
 # create the repo (operator action), set origin, then:
-bash tests/self-scan.sh                 # re-run from root — must be CLEAN
+bash tests/self-scan.sh                 # re-run from root; must be CLEAN
 for t in test-scan test-vet test-harden test-scan-content test-guard self-scan; do
   bash "tests/$t.sh" || exit 1
 done

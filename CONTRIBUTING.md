@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping make agent supply-chain security a little more boring.
+Contributions should make a defensive boundary easier to inspect, test, or enforce.
 
 ## Ground rules
 
@@ -28,6 +28,19 @@ bash tests/self-scan.sh          # this repo must be clean under its own scanner
 All six must pass (CI runs the same set). If you add a detection class, add both a
 positive fixture (it fires) and a negative fixture (it does not false-positive).
 
+Also run:
+
+```bash
+shellcheck -S warning scripts/*.sh scripts/repo-guard/*.sh tests/*.sh
+gitleaks git --no-banner --redact .
+```
+
+By submitting a contribution, you agree that it may be distributed under this
+repository's MIT License and that you have the right to submit it. AI-assisted work is
+accepted under the same standard as any other contribution: you remain responsible for
+its provenance, correctness, and reviewability. Do not add generated code or assets whose
+license or source cannot be explained.
+
 ## Reporting a vulnerability
 
-See `SECURITY.md` — report bypasses **privately**, not in a public issue.
+See `SECURITY.md`. Report bypasses **privately**, not in a public issue.

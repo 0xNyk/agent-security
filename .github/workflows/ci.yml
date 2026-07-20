@@ -1,8 +1,7 @@
 name: ci
 
-# Offline by design: this workflow runs only the bundled shell test suites and
-# the self-scan. It makes no network calls, installs no dependencies, and needs
-# no secrets. Actions are pinned to full commit SHAs (supply-chain hygiene).
+# The project tests are network-free and need no secrets. Runner setup installs
+# ShellCheck from Ubuntu repositories. Actions are pinned to full commit SHAs.
 
 on:
   push:
@@ -18,6 +17,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - name: Scanner fixture tests
         run: bash tests/test-scan.sh
@@ -40,4 +41,4 @@ jobs:
       - name: Shell lint (shellcheck)
         run: |
           sudo apt-get update -qq && sudo apt-get install -y shellcheck
-          shellcheck -S warning scripts/*.sh scripts/repo-guard/*.sh tests/*.sh || true
+          shellcheck -S warning scripts/*.sh scripts/repo-guard/*.sh tests/*.sh

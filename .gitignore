@@ -15,3 +15,16 @@ blocked.log
 # scratch
 *.tmp
 /tmp/
+.DS_Store
+*.swp
+*.swo
+*~
+.env
+.env.*
+!.env.example
+.idea/
+.vscode/
+.devgod/
+tmp/
+coverage/
+*.log

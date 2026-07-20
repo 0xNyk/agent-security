@@ -28,6 +28,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
 
 exec bash "$ROOT/scripts/scan-repo.sh" --all --markers /dev/null \
   --allow 'An exec \*\*sink\*\*' \

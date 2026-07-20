@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a defensive control or a bounded improvement.
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: threat
+    attributes:
+      label: Threat or failure mode
+      description: Describe the observed shape and why current controls do not cover it.
+    validations:
+      required: true
+  - type: textarea
+    id: boundary
+    attributes:
+      label: Proposed boundary
+      description: State what the change should catch and the first known limitation.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Public evidence
+      description: Link public sources or provide a synthetic fixture. Do not post exploit details for an unpatched bypass.
+
