@@ -93,13 +93,12 @@ mkdir -p "$WORK"
   cp -R "$DIR/." "$WORK/" 2>/dev/null
 rm -rf "$WORK/.git" 2>/dev/null
 (
-  cd "$WORK"
+  cd "$WORK" || exit 1
   GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null git init -q 2>/dev/null
   git config user.email vet@example.com; git config user.name vet; git config commit.gpgsign false
   git add -A 2>/dev/null
 )
 ENGINE_OUT="$(cd "$WORK" && AGENT_SECURITY_MARKERS=/dev/null bash "$SCAN_REPO" --all --markers /dev/null 2>&1)"
-ENGINE_CODE=$?
 ENGINE_CRIT="$(printf '%s\n' "$ENGINE_OUT" | grep -oE 'CRITICAL [0-9]+' | tail -1 | awk '{print $2}')"
 ENGINE_MAJOR="$(printf '%s\n' "$ENGINE_OUT" | grep -oE 'MAJOR [0-9]+' | tail -1 | awk '{print $2}')"
 ENGINE_CRIT="${ENGINE_CRIT:-0}"; ENGINE_MAJOR="${ENGINE_MAJOR:-0}"
