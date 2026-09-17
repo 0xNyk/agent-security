@@ -182,6 +182,73 @@ printf 'export function run(code){ return eval(code); }\n' >"$R/repl.js"
 git -C "$R" add -A
 run_expect "lone eval without an encoder stays clean" "$R" 0 --all
 
+# 12) WORM (CRITICAL): committed-config JS worm — campaign-tag assignment plus
+#     whitespace-padded payload appended after the last line of a build config.
+#     Synthetic fixture — an inert marker string and dummy identifiers, never a
+#     runnable obfuscator payload.
+R="$TMP/worm"; new_repo "$R"
+WORM_PAD="$(printf '%*s' 7000 '')"
+printf 'export default config;%s%s\n' "$WORM_PAD" "global['!']='9-7678';var _0x1a2b3c=1;" >"$R/postcss.config.mjs"
+git -C "$R" add -A
+run_expect "worm campaign-tag + padding fails" "$R" 1 --all
+expect_in_output "WORM class labeled" "[WORM"
+expect_in_output "campaign-tag hit attributed" "campaign-tag assignment"
+expect_in_output "padding hit attributed" "space/tab run before code"
+run_expect "worm still fails under --warn-only" "$R" 1 --all --warn-only
+
+# ...an alternate campaign tag plus a javascript-obfuscator dispatcher-function
+# scaffold, in a tailwind config.
+R="$TMP/wormtag"; new_repo "$R"
+printf '};%s\n' "global['_V']='A9-7678';function _0x37df(){var _0x580eb4=[1,2,3,4,5];}" >"$R/tailwind.config.js"
+git -C "$R" add -A
+run_expect "alternate campaign tag + obfuscator scaffold fails" "$R" 1 --all
+expect_in_output "obfuscator scaffold attributed" "javascript-obfuscator dispatcher function scaffold"
+
+# ...negative: an ordinary config file stays clean.
+R="$TMP/wormneg"; new_repo "$R"
+printf 'module.exports = { plugins: { tailwindcss: {}, autoprefixer: {} } };\n' >"$R/postcss.config.js"
+git -C "$R" add -A
+run_expect "ordinary postcss config stays clean" "$R" 0 --all
+
+# ...negative: a normal long minified line (no whitespace-padding run) stays clean.
+R="$TMP/wormneg2"; new_repo "$R"
+LONGLINE="var a=1;"
+i=0
+while [[ "$i" -lt 100 ]]; do LONGLINE+="b$i();"; i=$((i + 1)); done
+printf '%s\n' "$LONGLINE" >"$R/bundle.min.js"
+git -C "$R" add -A
+run_expect "normal minified line without padding stays clean" "$R" 0 --all
+
+# ...an alternate campaign-tag variant (global.i="A10-*32150") plus a distinct
+# _0x-obfuscated identifier, whitespace-padded in a build config.
+R="$TMP/wormv2"; new_repo "$R"
+printf 'module.exports = {};%*s%s\n' 300 '' "global.i=\"A10-*32150\";const _0xabcd12=1;" >"$R/postcss.config.js"
+git -C "$R" add -A
+run_expect "second campaign-tag variant fails" "$R" 1 --all
+expect_in_output "campaign-tag hit attributed" "campaign-tag assignment"
+
+# ...the older long-form of that variant: global.i + require shim reassignment +
+# a unicode-escaped module name inside require(...).
+R="$TMP/wormv2old"; new_repo "$R"
+python3 - "$R/vite.config.js" <<'PY'
+import sys
+path = sys.argv[1]
+content = ('global.i="A10-*32150";global.r=require;'
+           'typeof module==="object"&&(global.m=module);'
+           'const http=require("\\u0068ttp");\n')
+open(path, "w").write(content)
+PY
+git -C "$R" add -A
+run_expect "older long-form variant + unicode-escaped require fails" "$R" 1 --all
+expect_in_output "unicode-escaped require attributed" "unicode-escaped module name inside require()"
+
+# ...negative: an ordinary require() call (no unicode escape) in a config file
+# stays clean.
+R="$TMP/wormreqneg"; new_repo "$R"
+printf 'const http = require("http");\nmodule.exports = {};\n' >"$R/vite.config.js"
+git -C "$R" add -A
+run_expect "ordinary require() stays clean" "$R" 0 --all
+
 echo "---"
 if [[ "$FAILURES" -eq 0 ]]; then
   echo "OK — all scan-repo fixtures passed"

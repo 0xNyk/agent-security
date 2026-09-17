@@ -86,6 +86,19 @@ jobs:
 EOF
 run_expect "CI curl|bash -> REJECT" "$W" 1 "VERDICT: REJECT"
 
+# 4) WORM: a committed postcss config carrying the campaign-tag + whitespace-padded
+#    shape (routed through the shared scan-repo.sh engine) -> REJECT.
+#    Synthetic fixture — an inert marker string, never a runnable payload.
+G="$TMP/worm"; mkdir -p "$G"
+cat >"$G/package.json" <<'EOF'
+{ "name": "app", "scripts": { "build": "tsc" } }
+EOF
+WORM_PAD="$(printf '%*s' 7000 '')"
+printf 'export default config;%s%s\n' "$WORM_PAD" "global['!']='9-7678';var _0x1a2b3c=1;" >"$G/postcss.config.mjs"
+run_expect "committed-config worm -> REJECT" "$G" 1 "VERDICT: REJECT"
+OUTG="$(bash "$VET" "$G" 2>&1 || true)"
+echo "$OUTG" | grep -qF "WORM" && echo "  ok  WORM class surfaced through vet-incoming" || { echo "  XX  WORM class not surfaced"; FAILURES=$((FAILURES+1)); }
+
 echo "---"
 if [[ "$FAILURES" -eq 0 ]]; then
   echo "OK — all vet-incoming fixtures passed"

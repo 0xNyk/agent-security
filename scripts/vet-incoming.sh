@@ -14,7 +14,7 @@
 #   vet-incoming.sh --url <git-url>     # shallow-clone (depth 1), scan, clean up
 #   vet-incoming.sh <path> --json       # machine-readable verdict line too
 #
-# Runs the shared dropper/secret/invisible-unicode engine (scan-repo.sh) PLUS
+# Runs the shared dropper/secret/worm/invisible-unicode engine (scan-repo.sh) PLUS
 # adoption-specific checks:
 #   • package.json lifecycle scripts (preinstall/install/postinstall/prepare/…)  HIGH
 #   • dropper shapes in build/test/config files (vite/vitest/webpack/rollup/jest) CRIT
@@ -104,7 +104,7 @@ ENGINE_MAJOR="$(printf '%s\n' "$ENGINE_OUT" | grep -oE 'MAJOR [0-9]+' | tail -1 
 ENGINE_CRIT="${ENGINE_CRIT:-0}"; ENGINE_MAJOR="${ENGINE_MAJOR:-0}"
 if [[ "$ENGINE_CRIT" -gt 0 ]]; then
   crit "scan-repo engine: $ENGINE_CRIT CRITICAL (dropper/secret/invisible-unicode) — see detail:"
-  printf '%s\n' "$ENGINE_OUT" | grep -E '\[(SECRET|DROPPER|INVISIBLE_UNICODE)' | sed 's/^/         /'
+  printf '%s\n' "$ENGINE_OUT" | grep -E '\[(SECRET|DROPPER|WORM|INVISIBLE_UNICODE)' | sed 's/^/         /'
 elif [[ "$ENGINE_MAJOR" -gt 0 ]]; then
   med "scan-repo engine: $ENGINE_MAJOR MAJOR (paths/infra/personal) — usually benign in third-party code, review"
 else
