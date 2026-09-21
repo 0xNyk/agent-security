@@ -196,6 +196,20 @@ expect_in_output "campaign-tag hit attributed" "campaign-tag assignment"
 expect_in_output "padding hit attributed" "space/tab run before code"
 run_expect "worm still fails under --warn-only" "$R" 1 --all --warn-only
 
+# ...a later wave that drops the padding entirely: the payload is appended directly,
+# leaving one enormous line. Synthetic and inert — no real payload is reproduced.
+R="$TMP/wormlongline"; new_repo "$R"
+printf 'module.exports = {};%s\n' "global['!']='9-7934';var _0xaa11bb=1;$(printf 'x%.0s' $(seq 1 1200))" >"$R/vite.config.js"
+git -C "$R" add -A
+run_expect "worm padding-free long line fails" "$R" 1 --all
+expect_in_output "long-line hit attributed" "line over 1000 chars"
+
+# ...while an ordinary config with a merely long-ish line stays clean.
+R="$TMP/wormlongok"; new_repo "$R"
+printf 'module.exports = { plugins: {} }; // %s\n' "$(printf 'y%.0s' $(seq 1 300))" >"$R/postcss.config.js"
+git -C "$R" add -A
+run_expect "ordinary long-ish config line passes" "$R" 0 --all
+
 # ...an alternate campaign tag plus a javascript-obfuscator dispatcher-function
 # scaffold, in a tailwind config.
 R="$TMP/wormtag"; new_repo "$R"

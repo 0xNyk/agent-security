@@ -254,7 +254,7 @@ ENVB64_RE='^[A-Za-z_][A-Za-z0-9_]*=["'"'"']?[A-Za-z0-9+/_-]{24,}={0,2}["'"'"']?[
 #   (b) whitespace-padded code: a long blank run hides code past the visible margin
 #   (c) javascript-obfuscator scaffold: the generated dispatcher function, or a
 #       cluster of _0x-named identifiers, inside a config/build file
-WORMTAG_RE='global\[["'"'"'](!|_V)["'"'"']\][[:space:]]*=[[:space:]]*["'"'"']A?9-7678|global\[["'"'"'][^"'"'"']{1,3}["'"'"']\][[:space:]]*=[[:space:]]*["'"'"'][A-Z]?[0-9]-[0-9]{4}["'"'"']|global\.i[[:space:]]*=[[:space:]]*["'"'"']A[0-9]{1,3}-\*?[0-9]{3,6}["'"'"']'
+WORMTAG_RE='global\[["'"'"'](!|_V)["'"'"']\][[:space:]]*=[[:space:]]*["'"'"']A?9-7678|global\[["'"'"'][^"'"'"']{1,3}["'"'"']\][[:space:]]*=[[:space:]]*["'"'"'][A-Z]?[0-9]{1,3}-[0-9*]{1,6}(-[0-9]{1,3})?["'"'"']|global\.i[[:space:]]*=[[:space:]]*["'"'"'][A-Z]?[0-9]{1,3}-\*?[0-9]{1,6}(-[0-9]{1,3})?["'"'"']'
 WORMPAD_RE='[[:blank:]]{200,}[^[:blank:]]'
 WORMOBFFN_RE='function[[:space:]]+_0x[0-9a-f]+[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*var[[:space:]]+_0x[0-9a-f]+[[:space:]]*=[[:space:]]*\['
 WORMOBFID_RE='_0x[0-9a-f]{4,}'
@@ -324,6 +324,11 @@ scan_file() {
   record WORM "$f" "$(grep -nE "$WORMTAG_RE" "$c" | apply_allow || true)" "← global[] campaign-tag assignment (obfuscator payload marker)"
   if [[ "$f" =~ $WORMPADEXT_RE ]]; then
     record WORM "$f" "$(grep -nE "$WORMPAD_RE" "$c" | apply_allow || true)" "← 200+ space/tab run before code on one line (payload padding)"
+  fi
+  if [[ "$f" =~ $WORMCFGFILE_RE ]]; then
+    # Later waves drop the padding and simply append the payload, leaving one huge
+    # line. grep/git grep reject {1000,} (255-repetition limit) — use awk.
+    record WORM "$f" "$(awk 'length($0) > 1000 { printf "%d:%s\n", NR, substr($0, 1, 120); exit }' "$c" | apply_allow || true)" "← line over 1000 chars in a config/build file (appended payload)"
   fi
   if [[ "$f" =~ $WORMCFGFILE_RE ]]; then
     record WORM "$f" "$(grep -nE "$WORMOBFFN_RE" "$c" | apply_allow || true)" "← javascript-obfuscator dispatcher function scaffold"
