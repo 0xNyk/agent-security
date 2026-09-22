@@ -24,6 +24,7 @@
 #   'POISONED template: install-time postinstall'→ test-vet.sh fixture banner
 #   'const u = atob\(process\.env\.CFG_URL'      → test-vet.sh synthetic vite-config fixture
 #   'eval\(await \(await fetch\(u\)\)\.text'     → test-vet.sh synthetic vite-config fixture
+#   '_0x1a2b3c=1;'                               → test-vet.sh synthetic committed-config-worm fixture
 # If any OTHER finding appears, this exits non-zero — the allow-list is intentionally tight.
 set -euo pipefail
 
@@ -38,4 +39,5 @@ exec bash "$ROOT/scripts/scan-repo.sh" --all --markers /dev/null \
   --allow 'decoding a base64 URL, feeding' \
   --allow 'POISONED template: install-time postinstall' \
   --allow 'const u = atob\(process\.env\.CFG_URL' \
-  --allow 'eval\(await \(await fetch\(u\)\)\.text'
+  --allow 'eval\(await \(await fetch\(u\)\)\.text' \
+  --allow '_0x1a2b3c=1;'

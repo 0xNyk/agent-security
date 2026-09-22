@@ -30,8 +30,13 @@
 #   warning — the gate never ships anyone's private names. See
 #   private-markers.example.txt for the template.
 #
-# Finding classes: SECRET, DROPPER, INVISIBLE_UNICODE (CRITICAL) · PATH, INFRA,
-# PERSONAL, MARKER (MAJOR). DROPPER catches obfuscated code-execution shapes: a
+# Finding classes: SECRET, DROPPER, WORM, INVISIBLE_UNICODE (CRITICAL) · PATH,
+# INFRA, PERSONAL, MARKER (MAJOR). WORM catches the committed-config-file JS worm
+# (payload appended to a build/CSS config such as postcss.config.mjs or
+# tailwind.config.js): a global['x']='N-dddd' campaign-tag assignment, a 200+
+# space/tab run hiding code on one source line, or a javascript-obfuscator
+# scaffold (`function _0x...(){var _0x...=[` or 5+ distinct `_0x...` identifiers)
+# in a config/build file. DROPPER catches obfuscated code-execution shapes: a
 # deobfuscation/decode stage (base64, hex, charCode, \x/\u escape runs, string
 # reversal, XOR) feeding a dynamic-execution SINK (JS eval / new Function / vm.* /
 # dynamic import / child_process; Python exec/compile/__import__; PowerShell
@@ -97,7 +102,7 @@ git rev-parse --git-dir >/dev/null 2>&1 || { echo "not a git repository" >&2; ex
 
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/scan-repo.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
-: >"$TMP/SECRET"; : >"$TMP/DROPPER"; : >"$TMP/INVISIBLE_UNICODE"; : >"$TMP/PATH"; : >"$TMP/INFRA"; : >"$TMP/PERSONAL"; : >"$TMP/MARKER"; : >"$TMP/NOTE"
+: >"$TMP/SECRET"; : >"$TMP/DROPPER"; : >"$TMP/WORM"; : >"$TMP/INVISIBLE_UNICODE"; : >"$TMP/PATH"; : >"$TMP/INFRA"; : >"$TMP/PERSONAL"; : >"$TMP/MARKER"; : >"$TMP/NOTE"
 
 HAVE_PY=0
 if command -v python3 >/dev/null 2>&1; then
@@ -242,6 +247,23 @@ FETCHEVAL_RE='eval[[:space:]]*\([[:space:]]*await|eval[[:space:]]*\([[:space:]]*
 # AST taint; see the SAME-FILE LIMITATION note above).
 ENVDECODE_RE='(atob|Buffer\.from|b64decode|base64[_-]?decode|String\.fromCharCode|bytes\.fromhex)[^;]*(process\.env|process\.argv|os\.environ|sys\.argv|\$\{?[A-Z_]+\}?)'
 ENVB64_RE='^[A-Za-z_][A-Za-z0-9_]*=["'"'"']?[A-Za-z0-9+/_-]{24,}={0,2}["'"'"']?[[:space:]]*$'
+# Committed-config JS worm (a real 2026 incident: obfuscated payload appended to a
+# build/CSS config, e.g. postcss.config.mjs / tailwind.config.js). Same-file,
+# network-free shape checks, no cross-file dataflow needed:
+#   (a) campaign tag: global['x']='N-dddd' style assignment used as a payload marker
+#   (b) whitespace-padded code: a long blank run hides code past the visible margin
+#   (c) javascript-obfuscator scaffold: the generated dispatcher function, or a
+#       cluster of _0x-named identifiers, inside a config/build file
+WORMTAG_RE='global\[["'"'"'](!|_V)["'"'"']\][[:space:]]*=[[:space:]]*["'"'"']A?9-7678|global\[["'"'"'][^"'"'"']{1,3}["'"'"']\][[:space:]]*=[[:space:]]*["'"'"'][A-Z]?[0-9]{1,3}-[0-9*]{1,6}(-[0-9]{1,3})?["'"'"']|global\.i[[:space:]]*=[[:space:]]*["'"'"'][A-Z]?[0-9]{1,3}-\*?[0-9]{1,6}(-[0-9]{1,3})?["'"'"']'
+WORMPAD_RE='[[:blank:]]{200,}[^[:blank:]]'
+WORMOBFFN_RE='function[[:space:]]+_0x[0-9a-f]+[[:space:]]*\([[:space:]]*\)[[:space:]]*\{[[:space:]]*var[[:space:]]+_0x[0-9a-f]+[[:space:]]*=[[:space:]]*\['
+WORMOBFID_RE='_0x[0-9a-f]{4,}'
+# A unicode-escaped module name inside require(...) in a config/build file — an
+# obfuscation tell (e.g. require("http") for require("http")); no legitimate
+# reason for a build config to escape a plain ASCII module specifier this way.
+WORMUCREQ_RE='require[[:space:]]*\([^)]*\\u00[0-9a-fA-F]{2}[^)]*\)'
+WORMPADEXT_RE='\.(js|mjs|cjs|ts|mts|cts|jsx|tsx)$'
+WORMCFGFILE_RE='\.config\.[cm]?[jt]sx?$|(^|/)(vite|vitest|webpack|rollup|jest|babel|next|svelte|astro|tsup|esbuild|postcss|tailwind)\.[cm]?[jt]s$'
 PLACEHOLDER_RE='(x{4,}|X{4,}|your[-_]|example|placeholder|dummy|changeme|change-me|redacted|<[a-z_ -]+>|\$\{|\{\{|=\$|"\$|'"'"'\$|\.\.\.)'
 PRIVIP_RE='(^|[^0-9.])(10\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|172\.(1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}|192\.168\.[0-9]{1,3}\.[0-9]{1,3})([^0-9.]|$)'
 INTHOST_RE='[A-Za-z0-9][A-Za-z0-9-]*\.(internal|intranet|lan|corp)([^A-Za-z0-9.-]|$)'
@@ -296,6 +318,26 @@ scan_file() {
   local base; base="$(basename "$f")"
   if [[ "$base" == ".env" || ( "$base" == .env.* && "$base" != ".env.example" ) ]]; then
     record DROPPER "$f" "$(grep -nE "$ENVB64_RE" "$c" | apply_allow || true)" "← base64 blob under an env-var key in a committed env file"
+  fi
+
+  # WORM (CRITICAL): committed-config JS worm — see header for the shape.
+  record WORM "$f" "$(grep -nE "$WORMTAG_RE" "$c" | apply_allow || true)" "← global[] campaign-tag assignment (obfuscator payload marker)"
+  if [[ "$f" =~ $WORMPADEXT_RE ]]; then
+    record WORM "$f" "$(grep -nE "$WORMPAD_RE" "$c" | apply_allow || true)" "← 200+ space/tab run before code on one line (payload padding)"
+  fi
+  if [[ "$f" =~ $WORMCFGFILE_RE ]]; then
+    # Later waves drop the padding and simply append the payload, leaving one huge
+    # line. grep/git grep reject {1000,} (255-repetition limit) — use awk.
+    record WORM "$f" "$(awk 'length($0) > 1000 { printf "%d:%s\n", NR, substr($0, 1, 120); exit }' "$c" | apply_allow || true)" "← line over 1000 chars in a config/build file (appended payload)"
+  fi
+  if [[ "$f" =~ $WORMCFGFILE_RE ]]; then
+    record WORM "$f" "$(grep -nE "$WORMOBFFN_RE" "$c" | apply_allow || true)" "← javascript-obfuscator dispatcher function scaffold"
+    local obf_n
+    obf_n="$(grep -oE "$WORMOBFID_RE" "$c" 2>/dev/null | sort -u | wc -l | tr -d ' ' || true)"
+    if [[ "${obf_n:-0}" -ge 5 ]]; then
+      record WORM "$f" "$(grep -nE "$WORMOBFID_RE" "$c" | head -1 | apply_allow || true)" "← ${obf_n} distinct _0x-obfuscated identifiers in a config/build file"
+    fi
+    record WORM "$f" "$(grep -nE "$WORMUCREQ_RE" "$c" | apply_allow || true)" "← unicode-escaped module name inside require() in a config/build file"
   fi
 
   # INVISIBLE_UNICODE (CRITICAL): zero-width, bidi, PUA, tag, and supplementary
@@ -383,6 +425,7 @@ report_class() { # $1=class $2=severity
 }
 report_class SECRET CRITICAL
 report_class DROPPER CRITICAL
+report_class WORM CRITICAL
 report_class INVISIBLE_UNICODE CRITICAL
 report_class PATH MAJOR
 report_class INFRA MAJOR
