@@ -1,0 +1,129 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>agent-security v0.2 release card</title>
+<style>
+  /* Brand tokens (docs/brand.md). Signal appears exactly once, on the bypass path:
+     "one orange interruption at the boundary". Gates stay in instrument ink. */
+  :root {
+    --paper: #F3F0E8;
+    --carbon: #171717;
+    --signal: #F05A28;
+    --graphite: #73706A;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 1600px; height: 900px; }
+  body {
+    background: var(--paper);
+    color: var(--carbon);
+    font-family: ui-sans-serif, -apple-system, "Helvetica Neue", Arial, sans-serif;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Lab-notebook ground: faint graph rule, not decoration. */
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(to right, rgba(23,23,23,.055) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(23,23,23,.055) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+  .edge { position: absolute; inset: 0; border: 1px solid rgba(23,23,23,.18); margin: 34px; }
+  .wrap { position: relative; padding: 78px 92px 68px; height: 100%; display: flex; flex-direction: column; }
+
+  .kicker {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 21px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--graphite);
+    display: flex; justify-content: space-between; align-items: baseline;
+  }
+  .kicker b { color: var(--carbon); font-weight: 600; letter-spacing: .14em; }
+
+  h1 {
+    font-size: 60px; line-height: 1.08; font-weight: 600; letter-spacing: -.022em;
+    max-width: 24ch; margin-top: 26px;
+  }
+  /* The single Signal mark in the type: it lands on the clause the diagram proves. */
+  h1 em { font-style: normal; box-shadow: inset 0 -.10em 0 var(--signal); }
+
+  figure { flex: 1; display: flex; align-items: center; margin: 26px 0 4px; }
+
+  .foot {
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 22px; color: var(--graphite);
+    border-top: 1px solid rgba(23,23,23,.2); padding-top: 20px;
+  }
+  .foot b { color: var(--carbon); font-weight: 600; }
+
+  svg { display: block; width: 100%; height: auto; }
+  .lbl  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 19px; fill: var(--carbon); }
+  .lbl.dim { fill: var(--graphite); }
+  .gate { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; fill: var(--graphite);
+         paint-order: stroke; stroke: var(--paper); stroke-width: 7px; stroke-linejoin: round; }
+  .gatehdr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 16px; letter-spacing: .2em; fill: var(--graphite); }
+</style>
+
+<div class="grid"></div>
+<div class="edge"></div>
+
+<div class="wrap">
+  <div class="kicker"><span><b>agent-security</b> &nbsp;v0.2</span><span>deterministic safety gates</span></div>
+
+  <h1>Every gate watches a path. <em>Nothing watches the host.</em></h1>
+
+  <figure>
+    <svg viewBox="0 0 1180 396" role="img"
+         aria-label="Three inbound paths each cross a named gate on the way to your machine. A fourth path from a lifecycle script runs beneath the gates and reaches the machine without crossing any of them.">
+      <defs>
+        <marker id="tip" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#171717"/>
+        </marker>
+        <marker id="tipS" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+          <path d="M0,0 L10,5 L0,10 z" fill="#F05A28"/>
+        </marker>
+      </defs>
+
+      <!-- gate column -->
+      <text class="gatehdr" x="566" y="22" text-anchor="middle">GATES</text>
+      <line x1="566" y1="38" x2="566" y2="286" stroke="#171717" stroke-width="2" stroke-dasharray="7 7" opacity=".5"/>
+
+      <!-- gated paths -->
+      <g stroke="#171717" stroke-width="2.5" fill="none">
+        <line x1="252" y1="92"  x2="748" y2="92"  marker-end="url(#tip)"/>
+        <line x1="252" y1="176" x2="748" y2="176" marker-end="url(#tip)"/>
+        <line x1="252" y1="260" x2="748" y2="260" marker-end="url(#tip)"/>
+      </g>
+      <text class="lbl" x="0" y="98">repo content</text>
+      <text class="lbl" x="0" y="182">fetched content</text>
+      <text class="lbl" x="0" y="266">gh command</text>
+
+      <!-- each gate is named: the stop is a control, not an abstraction -->
+      <g stroke="#171717" stroke-width="7">
+        <line x1="566" y1="76"  x2="566" y2="108"/>
+        <line x1="566" y1="160" x2="566" y2="192"/>
+        <line x1="566" y1="244" x2="566" y2="276"/>
+      </g>
+      <text class="gate" x="566" y="62"  text-anchor="middle">scan</text>
+      <text class="gate" x="566" y="146" text-anchor="middle">scan-content</text>
+      <text class="gate" x="566" y="230" text-anchor="middle">guard</text>
+
+      <!-- destination -->
+      <rect x="768" y="52" width="292" height="248" fill="none" stroke="#171717" stroke-width="2.5"/>
+      <text class="lbl" x="914" y="126" text-anchor="middle" style="font-size:27px">your machine</text>
+      <text class="lbl dim" x="914" y="160" text-anchor="middle" style="font-size:18px">processes · autostart</text>
+      <line x1="820" y1="196" x2="1008" y2="196" stroke="#171717" stroke-width="1" opacity=".28"/>
+      <text class="lbl" x="914" y="232" text-anchor="middle" style="font-size:18px">v0.2 watches here</text>
+
+      <!-- the bypass: the only Signal element in the figure -->
+      <path d="M252 356 H 914 V 308" stroke="#F05A28" stroke-width="3.5" fill="none"
+            stroke-dasharray="10 8" marker-end="url(#tipS)"/>
+      <text class="lbl" x="0" y="362">lifecycle script</text>
+      <text class="lbl dim" x="252" y="390" style="font-size:18px">crosses no gate, so no gate reports it</text>
+    </svg>
+  </figure>
+
+  <div class="foot">
+    <span>new in v0.2 &nbsp;·&nbsp; <b>runtime-audit</b> &nbsp;·&nbsp; <b>check-url</b></span>
+    <span>github.com/0xNyk/agent-security</span>
+  </div>
+</div>
