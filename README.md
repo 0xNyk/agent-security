@@ -160,6 +160,7 @@ Detector changes need a positive fixture, a neighboring clean fixture, and a wri
 
 ## Status and license
 
+Experimental, maintained as capacity permits, and released under the [MIT License](LICENSE). The current release line is `0.2.x`. Release checks live in [RELEASE.md](RELEASE.md); engineering decisions and visual provenance live in the [field notes](docs/field-notes.md) and [brand guide](docs/brand.md).
 
 ---
 
@@ -170,4 +171,3 @@ Quiet commercial paths from [nyk.dev](https://www.nyk.dev) — same operator, fi
 - Free checklist: https://www.nyk.dev/resources/agent-os-checklist?utm_source=github&utm_medium=readme&utm_campaign=oss_proof&utm_content=agent-security
 - Self-serve Production Agent OS Kit (€149 founding): https://www.nyk.dev/go/agent-os-kit?utm_source=github&utm_medium=readme&utm_campaign=oss_proof&utm_content=agent-security
 - Hands-on packages: https://www.nyk.dev/consulting?utm_source=github&utm_medium=readme&utm_campaign=oss_proof&utm_content=agent-security#agent-os
-Experimental, maintained as capacity permits, and released under the [MIT License](LICENSE). The current release line is `0.2.x`. Release checks live in [RELEASE.md](RELEASE.md); engineering decisions and visual provenance live in the [field notes](docs/field-notes.md) and [brand guide](docs/brand.md).
