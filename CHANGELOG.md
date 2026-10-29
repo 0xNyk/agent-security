@@ -35,6 +35,19 @@ All notable changes to this project are documented here. This project adheres to
   minutes. Each fix has a neighbouring clean fixture. Runs under macOS `/bin/bash` 3.2 on
   an empty workspace (empty-array expansions are guarded; a crash would have exited `1`,
   which reads exactly like a finding), covered by a fixture that runs the system bash.
+- **ioc: the engineering-side limits are fixed.** Rogue-workflow filename tokens match
+  the basename only (a comment naming `security-audit.yml` no longer fires). Every
+  third-party Action used by tag or branch is reported as a note with its file, or as
+  `UNPINNED-ACTION` findings under `--strict-actions`, because the known-hijacked list is
+  always one publication behind a full-SHA pin. Home agent configs are shape-checked on
+  every run (`HOME-AGENT-HOOK`, `HOME-MCP-CONFIG`) so the hash baseline cannot bless a
+  fetch-and-exec entry present on the first run. A config that does not parse is
+  `AGENT-CONFIG-UNPARSEABLE`, and a machine without `python3` gets `AGENT-CONFIG-UNCHECKED`
+  instead of a silent pass. tmp executables now cover ELF (`TMP-ELF`) and scripts whose
+  body carries a stager shape (`TMP-SCRIPT`; a plain script is a note). Workspace walks
+  share one `--depth` (default 8) instead of five different hardcoded depths, and
+  `--timing` prints per-section seconds. Notes go to `ioc-sweep-notes.txt`. Seven new
+  fixtures, positive and negative.
 - **The scheduler test no longer assumes launchd.** Its interval read-back check planted
   a LaunchAgent plist and expected `--status` to read it, which only holds on macOS; on
   Linux the installer reads a systemd timer or the user's real crontab, which a test must

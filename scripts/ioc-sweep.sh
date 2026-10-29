@@ -15,6 +15,9 @@
 #                                    offline/fixture mode (tests)
 #   ioc-sweep.sh --days N            shell-history window (default 7)
 #   ioc-sweep.sh --accept-config     re-record the home agent-config baseline ([12])
+#   ioc-sweep.sh --strict-actions    every GitHub Action used by tag/branch is a finding
+#   ioc-sweep.sh --depth N           workspace walk depth (default 8)
+#   ioc-sweep.sh --timing            per-section seconds on stderr
 # Exit: 0 clean, 1 findings, 2 could not run (BLIND).
 set -uo pipefail
 PATH="/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
@@ -30,6 +33,9 @@ TMP_DIRS=()
 DAYS=7
 NOTIFY=1
 ACCEPT_CONFIG=0
+STRICT_ACTIONS=0
+DEV_DEPTH=8
+TIMING=0
 EXPLICIT_HIST=0; EXPLICIT_EXT=0; EXPLICIT_TMP=0
 
 while [[ $# -gt 0 ]]; do
@@ -44,7 +50,10 @@ while [[ $# -gt 0 ]]; do
     --days) DAYS="$2"; shift 2 ;;
     --no-notify) NOTIFY=0; shift ;;
     --accept-config) ACCEPT_CONFIG=1; shift ;;
-    -h|--help) sed -n '2,18p' "$0"; exit 0 ;;
+    --strict-actions) STRICT_ACTIONS=1; shift ;;
+    --depth) DEV_DEPTH="$2"; shift 2 ;;
+    --timing) TIMING=1; shift ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -63,6 +72,10 @@ LOG="$STATE/ioc-sweep.log"
 taskpolicy -b -p $$ 2>/dev/null || renice -n 15 -p $$ >/dev/null 2>&1
 
 find_hit() { printf '%s\n' "$*" >> "$OUT"; }
+note() { printf '%s\n' "$*" >> "$NOTES"; }
+NOTES="$STATE/ioc-sweep-notes.txt"; : > "$NOTES"
+T_LAST=$SECONDS
+mark() { (( TIMING )) || return 0; printf '  %-28s %4ds\n' "$1" $((SECONDS - T_LAST)) >&2; T_LAST=$SECONDS; }
 
 # Parse indicator file into per-kind arrays.
 IOC_PATHS=(); IOC_FILENAMES=(); IOC_PKGS=(); IOC_WORKFLOW=(); IOC_SHELL_RE=(); IOC_SHELL_NAME=()
@@ -96,14 +109,15 @@ for p in ${IOC_ABSPATHS[@]+"${IOC_ABSPATHS[@]}"}; do
   [[ -e "$p" ]] && find_hit "DROP-PATH $p"
 done
 if (( ${#IOC_REPOPATHS[@]} )) && [[ -d "$DEV_DIR" ]]; then
-  for rp in ${IOC_REPOPATHS[@]+"${IOC_REPOPATHS[@]}"}; do
-    find "$DEV_DIR" -maxdepth 7 -path "*/$rp" -not -path '*/node_modules/*' -not -path '*/tests/fixtures/*' 2>/dev/null |
-      while read -r f; do find_hit "REPO-PATH $f"; done
-  done
+  RP_EXPR=(); for rp in "${IOC_REPOPATHS[@]}"; do RP_EXPR+=( -o -path "*/$rp" ); done
+  find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o \( "${RP_EXPR[@]:1}" \) -print 2>/dev/null |
+    grep -v '/tests/fixtures/' |
+    while read -r f; do find_hit "REPO-PATH $f"; done
 fi
 for p in ${IOC_PATHS[@]+"${IOC_PATHS[@]}"}; do
   [[ -e "$HOME_DIR/$p" ]] && find_hit "DROP-PATH $HOME_DIR/$p"
 done
+mark '[1] drop paths'
 
 # [2] Known payload filenames: dev tree (INCLUDING node_modules — that is where Shai-Hulud
 #     lands), package caches, and $HOME top-level dot dirs. parser.js is only an IOC
@@ -132,6 +146,7 @@ if (( ${#NAME_EXPR[@]} )); then
     grep -vE '/(\.cursor|\.vscode|\.vscode-oss)/extensions/|/node_modules/' |
     while read -r f; do find_hit "PAYLOAD-FILE $f"; done
 fi
+mark '[2] payload filenames'
 
 # [3] Shai-Hulud preinstall hooks in installed package manifests.
 if [[ -d "$DEV_DIR" ]]; then
@@ -181,30 +196,65 @@ if (( ${#IOC_NPMVER[@]} )); then
   rm -f "$NM_MANIFESTS"
 fi
 
-# [5] Rogue GitHub Actions workflows and self-hosted runner installs.
-if (( ${#IOC_WORKFLOW[@]} )) && [[ -d "$DEV_DIR" ]]; then
-  WF_RE="$(printf '%s|' "${IOC_WORKFLOW[@]}")"; WF_RE="${WF_RE%|}"
-  find "$DEV_DIR" -maxdepth 4 -path '*/.github/workflows/*' -type f 2>/dev/null |
-    while read -r f; do
-      if [[ "$(basename "$f")" =~ ^(${WF_RE})$ ]] || grep -qiE "${WF_RE}" "$f" 2>/dev/null; then
+# [5] Rogue GitHub Actions workflows and self-hosted runner installs. One walk of the
+#     workspace collects every workflow file; [5], [5b] and [5c] read that list.
+WF_LIST="$(mktemp "${TMPDIR:-/tmp}/ioc-wf.XXXXXX")"
+[[ -d "$DEV_DIR" ]] && find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o -path '*/.github/workflows/*' -type f -print 2>/dev/null > "$WF_LIST"
+if (( ${#IOC_WORKFLOW[@]} )) && [[ -s "$WF_LIST" ]]; then
+  # A token that is a workflow FILENAME only matches the basename: a workflow that merely
+  # mentions security-audit.yml in a comment is not a rogue workflow. Marker tokens
+  # (commit-search strings, exfil hosts) still match anywhere in the content.
+  WF_NAME_RE=''; WF_BODY_RE=''
+  for w in "${IOC_WORKFLOW[@]}"; do
+    ew="$(re_escape "$w")"
+    case "$w" in *.yml|*.yaml) WF_NAME_RE+="${ew}|" ;; *) WF_BODY_RE+="${ew}|" ;; esac
+  done
+  WF_NAME_RE="${WF_NAME_RE%|}"; WF_BODY_RE="${WF_BODY_RE%|}"
+  while read -r f; do
+      if [[ -n "$WF_NAME_RE" && "$(basename "$f")" =~ ^(${WF_NAME_RE})$ ]]; then
+        find_hit "ROGUE-WORKFLOW $f (filename)"
+      elif [[ -n "$WF_BODY_RE" ]] && grep -qiE "${WF_BODY_RE}" "$f" 2>/dev/null; then
         find_hit "ROGUE-WORKFLOW $f"
       fi
-    done
+  done < "$WF_LIST"
 fi
 # [5b] Actions whose tags were hijacked: any use that is not a 40-hex commit pin.
-if (( ${#IOC_ACTIONREF[@]} )) && [[ -d "$DEV_DIR" ]]; then
+if (( ${#IOC_ACTIONREF[@]} )) && [[ -s "$WF_LIST" ]]; then
   for a in ${IOC_ACTIONREF[@]+"${IOC_ACTIONREF[@]}"}; do
     ea="$(re_escape "$a")"
-    find "$DEV_DIR" -maxdepth 4 -path '*/.github/workflows/*' -type f 2>/dev/null |
-      while read -r f; do
+    while read -r f; do
         grep -E "uses:[[:space:]]*['\"]?${ea}(/[^@[:space:]]*)?@" "$f" 2>/dev/null |
           grep -vqE "@[0-9a-f]{40}([[:space:]'\"#]|$)" && find_hit "HIJACKED-ACTION-BY-TAG $a $f"
-      done
+    done < "$WF_LIST"
   done
 fi
+# [5c] Every third-party action used by tag or branch. The known-hijacked list above is
+#      always one publication behind; the only durable protection is a full-SHA pin, so
+#      the sweep reports the exposure. A note by default (count + file list in
+#      ioc-sweep-notes.txt), a finding per use with --strict-actions.
+if [[ -s "$WF_LIST" ]]; then
+  UNPINNED="$(mktemp "${TMPDIR:-/tmp}/ioc-unpin.XXXXXX")"
+  grep -v '/tests/fixtures/' "$WF_LIST" |
+    while read -r f; do
+      grep -oE "uses:[[:space:]]*['\"]?[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[^[:space:]'\"#]+" "$f" 2>/dev/null |
+        grep -vE '@[0-9a-f]{40}$' | sed -E "s/^uses:[[:space:]]*['\"]?//" |
+        while read -r u; do printf '%s\t%s\n' "$u" "$f"; done
+    done > "$UNPINNED"
+  if [[ -s "$UNPINNED" ]]; then
+    if (( STRICT_ACTIONS )); then
+      while IFS=$'\t' read -r u f; do find_hit "UNPINNED-ACTION $u $f"; done < "$UNPINNED"
+    else
+      note "unpinned-actions: $(wc -l < "$UNPINNED" | tr -d ' ') use(s) by tag or branch in $(cut -f2 "$UNPINNED" | sort -u | wc -l | tr -d ' ') workflow file(s); pin to full commit SHAs or run with --strict-actions"
+      sort -u "$UNPINNED" | sed 's/^/  /' >> "$NOTES"
+    fi
+  fi
+  rm -f "$UNPINNED"
+fi
+rm -f "$WF_LIST"
 for r in "$HOME_DIR"/actions-runner "$HOME_DIR"/.runner "$HOME_DIR"/*/.runner; do
   [[ -e "$r" ]] && find_hit "ACTIONS-RUNNER $r"
 done
+mark '[5] workflows + actions'
 
 # [6] GlassWorm: invisible Unicode in IDE extensions and dev source.
 #     Only the Variation Selectors Supplement (U+E0100–U+E01EF, UTF-8 F3 A0 84..87 xx) is
@@ -247,6 +297,7 @@ done
 find "$HOME_DIR" -maxdepth 6 -type d \( -name node_modules -o -name .git -o -name '*.app' -o -name Containers -o -name 'Group Containers' \) -prune -o \
      -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) -name 'com.apple.*' -print 2>/dev/null |
   while read -r f; do find_hit "APPLE-NAMED-EXEC $f"; done
+SCRIPT_LURE_RE='curl |wget |base64 (-d|-D|--decode)|\beval |/dev/tcp/|osascript|xattr -[dc] |nohup |launchctl (load|bootstrap)|python3? -c|node -e|chmod \+x /tmp|/private/tmp/\.|\$\(curl'
 for t in ${TMP_DIRS[@]+"${TMP_DIRS[@]}"}; do
   [[ -n "$t" && -d "$t" ]] || continue
   for g in ${IOC_TMPGLOBS[@]+"${IOC_TMPGLOBS[@]}"}; do
@@ -257,9 +308,15 @@ for t in ${TMP_DIRS[@]+"${TMP_DIRS[@]}"}; do
       magic="$(head -c 4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')"
       case "$magic" in
         cffaedfe|cefaedfe|cafebabe|feedfacf|feedface) find_hit "TMP-MACHO $f" ;;
+        7f454c46) find_hit "TMP-ELF $f" ;;
+        2321*)   # '#!' — an executable script in tmp is common (installers, editors); it is a
+                 # finding only when its body carries a stager shape, otherwise a note
+          if LC_ALL=C grep -qE "$SCRIPT_LURE_RE" "$f" 2>/dev/null; then find_hit "TMP-SCRIPT $f"
+          else note "tmp-script: $f (executable script in tmp, no stager shape)"; fi ;;
       esac
     done
 done
+mark '[8] tmp + apple-named'
 
 # [9] The "auth error" config dropper (Contagious Interview; reported in 2026 inside a
 #     Capacitor config file): a base64 env var is decoded, fetched, and the body eval'd inside
@@ -273,13 +330,14 @@ SRC_EXT=( -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' -o -nam
 for root in "$DEV_DIR" "$HOME_DIR/.npm/_npx" "$HOME_DIR/.bun/install/cache" \
             "$HOME_DIR/Library/pnpm" "$HOME_DIR/.local/share/pnpm"; do
   [[ -d "$root" ]] || continue
-  find "$root" -maxdepth 9 \( "${PRUNE[@]}" \) -prune -o -type f \( "${SRC_EXT[@]}" \) -size -2M -print0 2>/dev/null |
+  find "$root" -maxdepth "$((DEV_DEPTH + 1))" \( "${PRUNE[@]}" \) -prune -o -type f \( "${SRC_EXT[@]}" \) -size -2M -print0 2>/dev/null |
     xargs -0 grep -lIE "$ENVDEC_RE" 2>/dev/null |
     grep -v '/tests/fixtures/' |
     while read -r f; do
       LC_ALL=C grep -qE "$SINK_RE" "$f" 2>/dev/null && find_hit "ENV-DECODE-DROPPER $f"
     done
 done
+mark '[9] env-decode dropper'
 
 # [10] PyPI: Hades / lightning / LiteLLM. Three surfaces: lock/requirements files in the
 #      dev tree, installed dist-info dirs anywhere under $HOME (uv tools, venvs, uv python
@@ -287,7 +345,7 @@ done
 py_norm() { printf '%s' "$1" | sed -e 's/[-_.]/[-_.]/g'; }   # PEP 503: - _ . are interchangeable
 PY_LOCKS=()
 [[ -d "$DEV_DIR" ]] && while IFS= read -r f; do PY_LOCKS+=("$f"); done < <(
-  find "$DEV_DIR" -maxdepth 5 -type d \( "${PRUNE[@]}" \) -prune -o -type f \
+  find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o -type f \
        \( -name uv.lock -o -name poetry.lock -o -name 'requirements*.txt' -o -name Pipfile.lock -o -name pyproject.toml \) -print 2>/dev/null)
 # one walk of $HOME for every site-packages artefact we care about (dist-info dirs,
 # .pth startup hooks, Hades _index.js); per-indicator greps run against this list
@@ -319,7 +377,7 @@ rm -f "$PY_INSTALLED"
 #      local cargo registry (src and cache).
 CARGO_LOCKS=()
 [[ -d "$DEV_DIR" ]] && while IFS= read -r f; do CARGO_LOCKS+=("$f"); done < <(
-  find "$DEV_DIR" -maxdepth 5 -type d \( "${PRUNE[@]}" \) -prune -o -type f -name Cargo.lock -print 2>/dev/null)
+  find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o -type f -name Cargo.lock -print 2>/dev/null)
 for c in ${IOC_CRATE[@]+"${IOC_CRATE[@]}"}; do
   ec="$(re_escape "$c")"
   for f in ${CARGO_LOCKS[@]+"${CARGO_LOCKS[@]}"}; do grep -qE "^name = \"${ec}\"$" "$f" 2>/dev/null && find_hit "MALICIOUS-CRATE $c $f"; done
@@ -341,36 +399,71 @@ done
 #      agent configs are hashed against a baseline (first run records it silently;
 #      --accept-config re-records after a deliberate change).
 FETCH_EXEC_RE='curl |wget |base64|node -e|bun -e|python3? -c|sh -c|bash -c|/tmp/|/private/tmp/|https?://[0-9]{1,3}(\.[0-9]{1,3}){3}|atob\(|eval\('
+HAVE_PY=1; command -v python3 >/dev/null 2>&1 || { HAVE_PY=0; find_hit "AGENT-CONFIG-UNCHECKED python3 missing: agent config JSON could not be inspected"; }
+# Prints the hooks object of a settings file; prints nothing when there is none; returns
+# 1 when the file is not valid JSON (a broken config is a finding, not an empty one).
+hooks_object() {
+  (( HAVE_PY )) || { cat "$1" 2>/dev/null; return 0; }
+  python3 -I -c 'import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: sys.exit(1)
+h=d.get("hooks") if isinstance(d,dict) else None
+print(json.dumps(h) if h else "")' "$1" 2>/dev/null
+}
+# The MCP server maps of a JSON config (mcp.json, .claude.json incl. per-project maps).
+mcp_maps() {
+  (( HAVE_PY )) || { cat "$1" 2>/dev/null; return 0; }
+  python3 -I -c 'import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: sys.exit(1)
+if not isinstance(d,dict): sys.exit(1)
+out={"mcpServers":d.get("mcpServers",{}),"projects":{k:v.get("mcpServers") for k,v in (d.get("projects") or {}).items() if isinstance(v,dict) and v.get("mcpServers")}}
+print(json.dumps(out,sort_keys=True))' "$1" 2>/dev/null
+}
 if [[ -d "$DEV_DIR" ]]; then
-  find "$DEV_DIR" -maxdepth 6 -path '*/.vscode/tasks.json' -type f -not -path '*/node_modules/*' -not -path '*/tests/fixtures/*' 2>/dev/null |
+  CFG_LIST="$(mktemp "${TMPDIR:-/tmp}/ioc-cfg-list.XXXXXX")"
+  find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o -type f \
+       \( -path '*/.vscode/tasks.json' -o -path '*/.claude/settings.json' -o -path '*/.claude/settings.local.json' \
+          -o -path '*/.cursor/settings.json' -o -path '*/.codex/hooks.json' -o -name '.mcp.json' \
+          -o -path '*/.cursor/mcp.json' -o -path '*/.vscode/mcp.json' -o -path '*/.codex/config.toml' \) -print 2>/dev/null |
+    grep -v '/tests/fixtures/' > "$CFG_LIST"
+  grep '/\.vscode/tasks\.json$' "$CFG_LIST" |
     while read -r f; do grep -q 'folderOpen' "$f" 2>/dev/null && find_hit "AUTORUN-TASK $f"; done
-  find "$DEV_DIR" -maxdepth 6 \( -path '*/.claude/settings.json' -o -path '*/.claude/settings.local.json' -o -path '*/.cursor/settings.json' -o -path '*/.codex/hooks.json' \) \
-       -type f -not -path '*/node_modules/*' -not -path '*/tests/fixtures/*' 2>/dev/null |
+  grep -E '/\.(claude/settings(\.local)?|cursor/settings|codex/hooks)\.json$' "$CFG_LIST" |
     while read -r f; do
       # only the hooks object counts: permission allowlists legitimately name curl/python -c
-      hooks="$(python3 -I -c 'import json,sys
-d=json.load(open(sys.argv[1])); h=d.get("hooks") or {}
-print(json.dumps(h) if h else "")' "$f" 2>/dev/null)"
-      [[ -z "$hooks" ]] && { command -v python3 >/dev/null 2>&1 || hooks="$(cat "$f")"; }
+      hooks="$(hooks_object "$f")" || { find_hit "AGENT-CONFIG-UNPARSEABLE $f"; continue; }
       [[ -z "$hooks" ]] && continue
       if grep -qE '"SessionStart"|"UserPromptSubmit"' <<<"$hooks" || grep -qE "$FETCH_EXEC_RE" <<<"$hooks"; then
         find_hit "REPO-AGENT-HOOK $f"
       fi
     done
-  find "$DEV_DIR" -maxdepth 6 \( -name '.mcp.json' -o -path '*/.cursor/mcp.json' -o -path '*/.vscode/mcp.json' -o -path '*/.codex/config.toml' \) \
-       -type f -not -path '*/node_modules/*' -not -path '*/tests/fixtures/*' 2>/dev/null |
+  grep -E '(/\.mcp\.json|/\.cursor/mcp\.json|/\.vscode/mcp\.json|/\.codex/config\.toml)$' "$CFG_LIST" |
     while read -r f; do grep -qE "$FETCH_EXEC_RE" "$f" 2>/dev/null && find_hit "SUSPICIOUS-MCP-CONFIG $f"; done
+  rm -f "$CFG_LIST"
 fi
 [[ -f "$HOME_DIR/.vscode/tasks.json" ]] && grep -q folderOpen "$HOME_DIR/.vscode/tasks.json" 2>/dev/null && find_hit "AUTORUN-TASK $HOME_DIR/.vscode/tasks.json"
+# Home agent configs are shape-checked on EVERY run, so the hash baseline below never
+# blesses a fetch-and-exec hook or MCP entry that was already there on the first run.
+# Session-start hooks are not flagged at home level: operators install their own.
+for f in "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.codex/hooks.json"; do
+  [[ -f "$f" ]] || continue
+  hooks="$(hooks_object "$f")" || { find_hit "AGENT-CONFIG-UNPARSEABLE $f"; continue; }
+  [[ -n "$hooks" ]] && grep -qE "$FETCH_EXEC_RE" <<<"$hooks" && find_hit "HOME-AGENT-HOOK $f (fetch/exec shape in hooks)"
+done
+for f in "$HOME_DIR/.cursor/mcp.json" "$HOME_DIR/.claude.json"; do
+  [[ -f "$f" ]] || continue
+  maps="$(mcp_maps "$f")" || { find_hit "AGENT-CONFIG-UNPARSEABLE $f"; continue; }
+  [[ -n "$maps" ]] && grep -qE "$FETCH_EXEC_RE" <<<"$maps" && find_hit "HOME-MCP-CONFIG $f (fetch/exec shape in MCP servers)"
+done
+[[ -f "$HOME_DIR/.hermes/config.yaml" ]] && grep -qE "$FETCH_EXEC_RE" "$HOME_DIR/.hermes/config.yaml" 2>/dev/null && find_hit "HOME-AGENT-HOOK $HOME_DIR/.hermes/config.yaml (fetch/exec shape)"
 AGENT_CFG=( "$HOME_DIR/.cursor/mcp.json" "$HOME_DIR/.hermes/config.yaml" "$HOME_DIR/.vscode/tasks.json" "$HOME_DIR/.codex/hooks.json" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.claude.json" )
 BASELINE="$STATE/agent-config.baseline"
 cfg_digest() {   # ~/.claude.json churns constantly; only its MCP server maps matter
   local f="$1"
-  if [[ "$(basename "$f")" == ".claude.json" ]] && command -v python3 >/dev/null 2>&1; then
-    python3 -I -c 'import json,sys
-d=json.load(open(sys.argv[1]))
-out={"mcpServers":d.get("mcpServers",{}),"projects":{k:v.get("mcpServers") for k,v in (d.get("projects") or {}).items() if v.get("mcpServers")}}
-print(json.dumps(out,sort_keys=True))' "$f" 2>/dev/null | shasum -a 256 | cut -c1-16
+  if [[ "$(basename "$f")" == ".claude.json" ]] && (( HAVE_PY )); then
+    # an unparseable file hashes as its raw bytes, never as a constant empty digest
+    { mcp_maps "$f" || cat "$f"; } | shasum -a 256 | cut -c1-16
   else
     shasum -a 256 "$f" 2>/dev/null | cut -c1-16
   fi
@@ -388,8 +481,10 @@ else
   done < "$NEWBASE"
 fi
 rm -f "$NEWBASE"
+mark '[12] agent configs'
 
 n=$(grep -c . "$OUT" 2>/dev/null); n=${n:-0}
+if [[ -s "$NOTES" ]]; then echo "NOTES ($(grep -c '^[a-z]' "$NOTES") item(s), not findings): $NOTES"; grep '^[a-z]' "$NOTES" | sed 's/^/  /'; fi
 echo "$(date -u +%FT%TZ) ioc sweep complete — findings: $n" >> "$LOG"
 if (( n > 0 )); then
   head -30 "$OUT" >> "$LOG"

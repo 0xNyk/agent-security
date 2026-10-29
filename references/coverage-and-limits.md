@@ -309,11 +309,13 @@ session.
 | `PREINSTALL-HOOK` | a pre/postinstall whose command names a known worm loader |
 | `MALICIOUS-PYPKG` / `COMPROMISED-PYPI-RELEASE` / `PYTHON-STARTUP-HOOK` | PEP 503-normalised name match in uv / poetry / requirements / pyproject locks and every `*.dist-info` under `$HOME`; the `*-setup.pth` + `_index.js` startup shape in any site-packages |
 | `MALICIOUS-CRATE` / `HIJACKED-CRATE-RELEASE` | `Cargo.lock` name + version pairs and `~/.cargo/registry` directories |
-| `ROGUE-WORKFLOW` / `ACTIONS-RUNNER` / `HIJACKED-ACTION-BY-TAG` | a known marker token anywhere in a workflow's content (so a comment that names one fires too); a self-hosted runner install in a workflow; a `uses:` of a hijacked action that is not a 40-hex SHA pin |
+| `ROGUE-WORKFLOW` / `ACTIONS-RUNNER` / `HIJACKED-ACTION-BY-TAG` / `UNPINNED-ACTION` | a known rogue workflow *filename* (basename match only, so a comment that names one does not fire) or a known marker token in a workflow's content; a self-hosted runner install; a `uses:` of a known-hijacked action that is not a 40-hex SHA pin; with `--strict-actions`, every third-party action used by tag or branch (a note with the file list otherwise) |
 | `ENV-DECODE-DROPPER` | a base64 decode of an environment variable and an exec sink in the same source or config file, node_modules pruned, files over 2 MB skipped |
 | `AUTORUN-TASK` / `REPO-AGENT-HOOK` / `SUSPICIOUS-MCP-CONFIG` | repository `.vscode/tasks.json` with `folderOpen`; the `hooks` object of repository `.claude` / `.cursor` / `.codex` settings with session-start hooks or fetch-and-exec shapes; repository MCP configs with fetch-and-exec shapes |
 | `AGENT-CONFIG-NEW` / `AGENT-CONFIG-DRIFT` | a home agent config appeared or changed since the recorded hash baseline (for `~/.claude.json` only the MCP server maps are hashed, so ordinary UI state does not fire) |
-| `SHELL-LURE` / `APPLE-NAMED-EXEC` / `TMP-MACHO` / `INVISIBLE-UNICODE-EXT` / `INVISIBLE-UNICODE-SRC` | ClickFix lure shapes in recent history (pattern name and host only), executables named `com.apple.*` outside bundles, Mach-O files written to tmp within the window (Mach-O only: scripts and ELF binaries are not flagged), Variation Selectors Supplement bytes in IDE extensions and workspace source |
+| `HOME-AGENT-HOOK` / `HOME-MCP-CONFIG` | a fetch-and-exec shape in the `hooks` object of `~/.claude/settings.json` or `~/.codex/hooks.json`, in the MCP server maps of `~/.cursor/mcp.json` or `~/.claude.json`, or in `~/.hermes/config.yaml`; checked on every run, independent of the baseline |
+| `AGENT-CONFIG-UNPARSEABLE` / `AGENT-CONFIG-UNCHECKED` | an agent config that is not valid JSON; `python3` missing so no JSON config could be inspected |
+| `SHELL-LURE` / `APPLE-NAMED-EXEC` / `TMP-MACHO` / `TMP-ELF` / `TMP-SCRIPT` / `INVISIBLE-UNICODE-EXT` / `INVISIBLE-UNICODE-SRC` | ClickFix lure shapes in recent history (pattern name and host only), executables named `com.apple.*` outside bundles, Mach-O or ELF files written to tmp within the window, executable scripts in tmp whose body carries a stager shape (curl/wget, base64 decode, `/dev/tcp`, quarantine strip, launchctl load; a script without one is a note), Variation Selectors Supplement bytes in IDE extensions and workspace source |
 
 ### What it does NOT catch — the honest boundaries
 
@@ -322,22 +324,24 @@ session.
   was last updated, or a loader split across two files walks past. The list is a
   snapshot; append to it.
 - **Hijacked actions are detected by reference.** The sweep cannot tell whether a tag has
-  already been repointed; it tells you which workflows would follow it if it were. Only a
-  full-SHA pin closes that.
-- **The config baseline blesses the first run.** If an injected hook is already in a home
-  agent config when the baseline is recorded, it is normal from then on. Read those files
-  once yourself.
+  already been repointed. It reports every action used by tag or branch (note by default,
+  `--strict-actions` for findings) because a full-SHA pin is the only thing that closes
+  this class, and the known-hijacked list is always one publication behind.
+- **The baseline is only a diff.** It says a home config changed, not whether the change
+  is bad. The shape check that runs on every pass is what catches a fetch-and-exec hook,
+  including one present before the baseline was recorded. A hook that runs a local
+  script by path is deliberately not flagged at home level.
 - **Shell history is optional.** A lure pasted into a terminal with history off leaves
   nothing to read, and the check never prints the command itself.
 - **Package stores are pruned for the dropper shape.** A dropper inside node_modules is
   caught by name and version rules, not by the decode-then-exec rule; walking every
   minified bundle for that shape produced only false positives (bundlers that decode an
   embedded archive next to an environment check).
-- **Bounded walks.** Workspace walks stop between four and nine levels deep depending on
-  the check; a very deep monorepo is partly unseen.
-- **Broken JSON is treated as empty.** A repository agent config that does not parse is
-  reported as having no hooks, and a home config that does not parse hashes to a constant.
-  The parser is `python3`; on a machine without it the agent-config checks silently pass.
+- **Walks are bounded.** `--depth` (default 8 below the workspace root, package stores
+  pruned) caps every workspace walk; a deeper monorepo needs a higher value and pays
+  linearly for it. `--timing` shows where the seconds go.
+- **Scripts in tmp are judged by body, not presence.** A stager that avoids every shape
+  in the lure pattern is a note, not a finding.
 - **Not an AV.** No hashes of binaries, no signing checks, no network reputation. A
   CLEAN result means no listed indicator matched.
 
@@ -345,7 +349,10 @@ session.
 
 During development the sweep reported eight findings on a clean workspace, all false:
 permission allowlists that merely *named* `curl` and `python3 -c`, and a real
-`Math_Symbol.js` shipped by a Unicode data package. A daily sweep that cries wolf is a daily sweep that
+`Math_Symbol.js` shipped by a Unicode data package. The next round repeated it: a
+workflow that *mentioned* a rogue filename in a comment fired, and an executable shell
+script in tmp fired. Filename tokens now match basenames only, and tmp scripts need a
+stager shape; both have clean fixtures. A daily sweep that cries wolf is a daily sweep that
 gets switched off, so the hooks check now reads only the `hooks` object, the filename
 rule is exempt inside package stores, and both cases have clean fixtures.
 

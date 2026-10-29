@@ -309,6 +309,9 @@ scripts/ioc-sweep.sh --days 30         # widen the shell-history window
 scripts/ioc-sweep.sh --accept-config   # re-record the home agent-config baseline after a deliberate change
 scripts/ioc-sweep.sh --dev ~/src       # workspace root other than ~/dev
 scripts/ioc-sweep.sh --no-notify       # for cron; skips the macOS notification
+scripts/ioc-sweep.sh --strict-actions  # every Action used by tag/branch becomes a finding
+scripts/ioc-sweep.sh --depth 12        # deeper workspace walk (default 8)
+scripts/ioc-sweep.sh --timing          # per-section seconds on stderr
 ```
 
 Finding tags: `DROP-PATH`, `PAYLOAD-FILE`, `REPO-PATH`, `TMP-STAGING`, `TMP-MACHO`,
@@ -316,8 +319,15 @@ Finding tags: `DROP-PATH`, `PAYLOAD-FILE`, `REPO-PATH`, `TMP-STAGING`, `TMP-MACH
 `ACTIONS-RUNNER`, `HIJACKED-ACTION-BY-TAG`, `MALICIOUS-PYPKG`, `COMPROMISED-PYPI-RELEASE`,
 `PYTHON-STARTUP-HOOK`, `MALICIOUS-CRATE`, `HIJACKED-CRATE-RELEASE`, `ENV-DECODE-DROPPER`,
 `AUTORUN-TASK`, `REPO-AGENT-HOOK`, `SUSPICIOUS-MCP-CONFIG`, `AGENT-CONFIG-NEW`,
-`AGENT-CONFIG-DRIFT`, `SHELL-LURE`, `APPLE-NAMED-EXEC`, `INVISIBLE-UNICODE-EXT`,
+`AGENT-CONFIG-DRIFT`, `AGENT-CONFIG-UNPARSEABLE`, `AGENT-CONFIG-UNCHECKED`,
+`HOME-AGENT-HOOK`, `HOME-MCP-CONFIG`, `UNPINNED-ACTION` (strict mode), `TMP-ELF`,
+`TMP-SCRIPT`, `SHELL-LURE`, `APPLE-NAMED-EXEC`, `INVISIBLE-UNICODE-EXT`,
 `INVISIBLE-UNICODE-SRC`.
+
+Notes are not findings. Things worth knowing that are not evidence of compromise go to
+`ioc-sweep-notes.txt` and are printed under `NOTES`: every third-party Action used by
+tag or branch (with the file list, so you can pin them), and executable scripts in tmp
+that carry no stager shape.
 
 Findings: `~/.local/state/agent-security/ioc-sweep-findings.txt`; log: `ioc-sweep.log`.
 The first run records the agent-config baseline silently; every later run reports
@@ -333,18 +343,24 @@ Limits, plainly:
 - **Names, paths, versions and shapes.** A renamed payload, a compromise published after
   the indicator list was last updated, or a loader split across two files walks past.
   The list is a snapshot of public reporting through late October 2026.
-- **Hijacked-action detection is by reference, not content.** Only a full-SHA pin
-  protects you from the next tag repoint; the sweep tells you which workflows are
-  exposed, it cannot tell you whether the tag has already moved.
-- **The config baseline blesses whatever is there on first run.** Read the home agent
-  configs yourself once before trusting the diff.
+- **Hijacked-action detection is by reference, not content.** The sweep cannot tell
+  whether a tag has already moved. What it can do is show every Action you use by tag
+  or branch (a note by default, findings with `--strict-actions`) so you can pin them to
+  full commit SHAs, which is the only durable protection.
+- **The baseline is a diff, the shape check is the guard.** Home agent configs are
+  shape-checked on every run for fetch-and-exec hooks and MCP entries, so the hash
+  baseline cannot bless one that was already there. A hook that merely runs a local
+  script is not flagged at home level; read those once yourself.
 - **History lures.** A command pasted into a terminal whose history is off leaves nothing
   to read.
-- **Bounded walks.** Workspace walks stop between four and nine levels deep depending on
-  the check, so a very deep monorepo is partly unseen. The tmp check reports Mach-O
-  files only; a shell script or ELF binary dropped in tmp is not a finding.
-- **Workflow tokens match content, not filenames.** A workflow that merely mentions
-  `security-audit.yml` in a comment fires `ROGUE-WORKFLOW`. Read the line before acting.
+- **Walks are bounded by `--depth`** (default 8 below the workspace root, package
+  stores pruned). Raise it for a very deep monorepo; the cost is linear.
+- **tmp executables.** Mach-O and ELF files are findings. An executable script is a
+  finding only when its body carries a stager shape, otherwise a note, because editors
+  and installers leave scripts in tmp all day.
+- **A config that does not parse is a finding** (`AGENT-CONFIG-UNPARSEABLE`), and a
+  machine without `python3` gets one `AGENT-CONFIG-UNCHECKED` line rather than a silent
+  pass.
 
 ### `guard-install` — repository-lifecycle guard
 

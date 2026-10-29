@@ -151,6 +151,7 @@ it yet; the lines below do the job. Pass `--no-notify` under cron.
 ```sh
 scripts/ioc-sweep.sh                       # sweep now
 scripts/ioc-sweep.sh --accept-config       # after you deliberately change a home agent config
+scripts/ioc-sweep.sh --strict-actions      # once, to get every unpinned Action as a finding and pin them
 ```
 
 macOS, `~/Library/LaunchAgents/com.agent-security.ioc-sweep.plist` (replace the path):

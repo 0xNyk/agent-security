@@ -133,7 +133,7 @@ These tools are Tier 1 tripwires: early, deterministic, and explainable. They do
 - `harden` returns `UNKNOWN` when capability cannot be inspected. Unknown is not clear.
 - `check-url` reads URL strings, not reputation. A compromised well-known domain still returns `ALLOW`, and the hook only covers the tools its matcher names.
 - `runtime` reads command lines, not memory. An implant that execs from a file, rewrites its `argv`, or sleeps between beacons does not appear. Scheduling changes how often it looks, never how deeply.
-- `ioc` matches names, paths, versions, and shapes from public reporting. A renamed payload or a compromise published after the indicator list was last updated walks past it, and only a full-SHA pin protects you from the next Action tag repoint.
+- `ioc` matches names, paths, versions, and shapes from public reporting. A renamed payload or a compromise published after the indicator list was last updated walks past it. It reports every Action you use by tag so you can pin them, because only a full-SHA pin protects you from the next tag repoint.
 
 The [coverage matrix and bypass table](references/coverage-and-limits.md) state what each detector sees, misses, and delegates to a stronger control.
 
