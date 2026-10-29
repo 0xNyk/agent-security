@@ -47,7 +47,10 @@ All notable changes to this project are documented here. This project adheres to
   body carries a stager shape (`TMP-SCRIPT`; a plain script is a note). Workspace walks
   share one `--depth` (default 8) instead of five different hardcoded depths, and
   `--timing` prints per-section seconds. Notes go to `ioc-sweep-notes.txt`. Seven new
-  fixtures, positive and negative.
+  fixtures, positive and negative. The sweep no longer runs under macOS background QoS:
+  `taskpolicy -b` throttles IO and pins to efficiency cores, which turned a ten-minute
+  run into forty; it now runs at plain low CPU priority, and the hijacked-action check
+  reads each workflow once instead of once per indicator.
 - **The scheduler test no longer assumes launchd.** Its interval read-back check planted
   a LaunchAgent plist and expected `--status` to read it, which only holds on macOS; on
   Linux the installer reads a systemd timer or the user's real crontab, which a test must

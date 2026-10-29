@@ -69,7 +69,10 @@ LOG="$STATE/ioc-sweep.log"
 : > "$OUT" || { echo "BLIND: cannot write $OUT" >&2; exit 2; }
 
 # Background QoS: efficiency cores, throttled IO (macOS taskpolicy, else renice).
-taskpolicy -b -p $$ 2>/dev/null || renice -n 15 -p $$ >/dev/null 2>&1
+# Plain nice, not background QoS: taskpolicy -b throttles IO and pins to efficiency cores,
+# which made a 10-minute sweep take 40. A shorter run at low CPU priority disturbs the
+# machine less than a long one at throttled IO.
+renice -n 10 -p $$ >/dev/null 2>&1
 
 find_hit() { printf '%s\n' "$*" >> "$OUT"; }
 note() { printf '%s\n' "$*" >> "$NOTES"; }
@@ -220,13 +223,13 @@ if (( ${#IOC_WORKFLOW[@]} )) && [[ -s "$WF_LIST" ]]; then
 fi
 # [5b] Actions whose tags were hijacked: any use that is not a 40-hex commit pin.
 if (( ${#IOC_ACTIONREF[@]} )) && [[ -s "$WF_LIST" ]]; then
-  for a in ${IOC_ACTIONREF[@]+"${IOC_ACTIONREF[@]}"}; do
-    ea="$(re_escape "$a")"
-    while read -r f; do
-        grep -E "uses:[[:space:]]*['\"]?${ea}(/[^@[:space:]]*)?@" "$f" 2>/dev/null |
-          grep -vqE "@[0-9a-f]{40}([[:space:]'\"#]|$)" && find_hit "HIJACKED-ACTION-BY-TAG $a $f"
-    done < "$WF_LIST"
-  done
+  AR_RE=''; for a in "${IOC_ACTIONREF[@]}"; do AR_RE+="$(re_escape "$a")|"; done; AR_RE="${AR_RE%|}"
+  while read -r f; do
+    # one pass per file: every use of a listed action that is not a 40-hex pin
+    grep -oE "uses:[[:space:]]*['\"]?(${AR_RE})(/[^@[:space:]]*)?@[^[:space:]'\"#]+" "$f" 2>/dev/null |
+      grep -vE '@[0-9a-f]{40}$' | sed -E "s/^uses:[[:space:]]*['\"]?//; s#^([^/]+/[^/@]+).*#\1#" | sort -u |
+      while read -r a; do find_hit "HIJACKED-ACTION-BY-TAG $a $f"; done
+  done < "$WF_LIST"
 fi
 # [5c] Every third-party action used by tag or branch. The known-hijacked list above is
 #      always one publication behind; the only durable protection is a full-SHA pin, so
