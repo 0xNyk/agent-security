@@ -20,7 +20,7 @@ about the rest.
 | `SECRET` | CRITICAL | Private-key blocks; known token shapes (`sk_live`, `ghp_`, `github_pat_`, `xox*`, `AKIA…`, `glpat-`, `AIza…`); `key/secret/token/password = "…"` assignments; `*_SECRET/*_TOKEN=` env lines; `scheme://user:pass@host` connection strings; JWTs; `Set-Cookie` values. Placeholder-shaped values are excluded. |
 | `DROPPER` | CRITICAL | An exec **sink** (`eval` / `new Function` / `vm.*` / dynamic `import` / `child_process`; Python `exec`/`compile`/`__import__`; PowerShell `IEX`/`-EncodedCommand`) co-occurring **in the same file** with a decode **encoder** (base64/hex/charCode/`\x`·`\u` runs/reverse/XOR) or a network fetcher; fetch-then-exec shapes; decode-of-env/argv reaching a sink; a base64 blob under an env-var key in a committed `.env`. |
 | `INVISIBLE_UNICODE` | CRITICAL | Zero-width, bidi, PUA, tag, and supplementary variation-selector codepoints that hide executable text (the GlassWorm class). BMP variation selectors (U+FE0F) are excluded — emoji use them. |
-| `PATH` | MAJOR | Personal home paths (`/Users/<name>`, `/home/<name>`, Windows profile paths); `~/.ssh`, `~/.aws` references. Neutral placeholders (`example`, `you`, `runner`, …) are excluded. |
+| `PATH` | MAJOR | Personal home paths (`/Users/<name>`, `/home/<name>`, Windows profile paths); `~/.ssh`, `~/.aws` references; hardcoded personal workspace roots (`$HOME/dev/…`, `~/projects/…`, `~/src/…`). Neutral placeholders (`example`, `you`, `runner`, …) and ordinary `$HOME` dot-directories (`$HOME/.config`, `$HOME/.cache`) are excluded. |
 | `INFRA` | MAJOR | RFC-1918 private IPs; `*.internal`/`.intranet`/`.lan`/`.corp` hostnames; concrete `ssh user@host` destinations. |
 | `PERSONAL` | MAJOR | Real-looking emails (excluding `example`/`test`/`noreply` and your own git-identity email) and phone numbers. |
 | `MARKER` | MAJOR | Fixed strings you list in your **local** marker file (`[names]`, `[paths]`). Never shipped; see `private-markers.example.txt`. |
@@ -38,6 +38,12 @@ with `--warn-only` (report without failing) or cleared per-line with `--allow '<
   Closing the config↔`.env` gap is a Tier-2 job: AST/dataflow taint that follows a decode
   source to an exec sink **across** files (Semgrep Pro / CodeQL). State the boundary; do not
   pretend the regex closed it.
+- **Private context that does not look like a path.** The `PATH` class catches personal
+  home and workspace roots by shape. It cannot know that a *name* is private — a sibling
+  repository, an internal service, a codename — because that knowledge is local to you.
+  That is the entire purpose of the marker file, and with no marker file configured the
+  gate says so and runs the generic layer only. If your release process depends on
+  catching private names, configure markers; do not rely on the shape rules.
 - **Novel encoders / custom alphabets / heavy obfuscation.** Every regex family has a
   documented evasion (Lazarus HexEval vs regex; custom-alphabet base64 vs entropy; GlassWorm
   vs token scanners). This gate raises the cost of the common shapes; it is not a proof.
@@ -176,6 +182,112 @@ enforce** it: treat all fetched content as data (`references/untrusted-content.m
 poisoned turn cannot both read secrets and exfiltrate, apply Meta's **Rule of Two**, allowlist
 egress, and require a human gate at trust-boundary crossings. Use the scanner as a cheap
 tripwire on top of that contract — never as a substitute for it.
+
+---
+
+## `check-url.sh` — pre-fetch research egress classifier
+
+Classifies a URL **string** before the agent fetches, browses, or downloads it. Network-free
+(no DNS, no HTTP). Exit: **0 ALLOW · 1 REVIEW · 2 BLOCK**.
+
+### What it flags
+
+| Verdict | Examples |
+|---|---|
+| **BLOCK** | `file:`/`data:`/`javascript:` schemes; credentials in URL; localhost; executables/installers (`.exe` `.dmg` `.pkg`…); archives (`.zip` `.tar.gz`…); install scripts (`.sh` `.ps1`…) |
+| **REVIEW** | plain `http:`; `.pdf`/Office docs; IP-literal hosts; punycode (`xn--`); URL shorteners; free file hosts; download-path hints; very long URLs/queries |
+| **ALLOW** | normal `https://` HTML/docs paths with no blocked/review extension |
+
+### What it does NOT catch — the honest boundaries
+
+- **No live reputation.** A compromised `docs.example.com` still ALLOW if the URL shape is
+  clean. This is intentional: the tool does not pretend to know host safety.
+- **No redirect following.** A shortener is REVIEW; the landing host is not resolved here.
+- **Does not enforce agent behavior alone.** Pair with the PreToolUse hook
+  (`scripts/research-egress-install.sh` → `block-research-egress`) which mechanically
+  denies BLOCK (always) and REVIEW (unless `RESEARCH_URL_OK=<exact-url>`). SERP
+  spray-click discipline remains in `references/safe-research.md`.
+- **Allowlist never unblocks BLOCK** schemes/extensions — only host-reputation REVIEW items.
+
+---
+
+## `research-egress` PreToolUse hook
+
+Installed via `scripts/research-egress-install.sh` to `~/.claude/hooks/block-research-egress.sh`
+(+ `~/.grok/hooks/research-egress.json`). Watches `web_fetch` / `open_page` / `Bash` curl|wget.
+
+| Verdict | Hook action |
+|---|---|
+| ALLOW | Pass |
+| REVIEW | Deny unless `RESEARCH_URL_OK` matches the exact URL |
+| BLOCK | Always deny (no env override) |
+
+### Limits
+
+- Matcher-bound: non-listed tools and most MCP servers are not covered.
+- REVIEW override is env-based (same class as other human-in-the-loop tokens) — a fully
+  jailbroken agent that can set env could spoof it; BLOCK cannot be spoofed this way.
+- Still network-free classification (no live reputation).
+
+---
+
+## `runtime-audit.sh` — the host runtime audit
+
+Every other control in this document watches a gate. This one watches the machine, and
+it exists because a gate-only posture has a hole the size of anything that never touches
+a gate: a node command-line implant ran for four and a half days on a host where every
+other control here was installed and healthy. It was never in a repository and never in
+an agent tool call, so nothing looked at it.
+
+### What it flags
+
+| Check | Shape |
+|---|---|
+| Inline-eval processes | `node -e` / `bun -e` / `deno eval` / `python -c` / `sh -c … curl … \| sh` |
+| Dropper markers in a command line | exec sink (`eval(`, `new Function(`) co-occurring with an encoder, a network fetcher, a respawn call (`child_process`, `detached: true`), or a blockchain-C2 host |
+| Orphaned interpreters | PPID 1, long-lived, inline-eval — the spawner exited, the child was left detached |
+| Autostart drift | launchd plists, systemd user units, XDG autostart, `cron.d`, against a recorded baseline |
+| Shell/agent config drift | rc, profile, and env dotfiles in `$HOME` and agent config directories |
+
+A long-lived inline eval with no other markers is a `WARN`, not a finding: legitimate
+inline eval exists, it is just normally short-lived. Blockchain RPC hosts never fire on
+their own — plenty of people work on blockchains — they only add weight to a process
+that is already an inline eval.
+
+### What it does NOT catch — the honest boundaries
+
+- **Command lines only.** An implant that execs from a file, rewrites its own `argv`, or
+  hides its arguments does not appear here. This reads `ps`, not memory.
+- **Point-in-time.** It reports what is running at the instant it runs. Unscheduled, that
+  instant is "whenever someone remembers", which is exactly how four and a half days
+  passed before anyone looked. `runtime-audit-install.sh` fixes the trigger — hourly by
+  default — but a scheduled audit still only samples: an implant that starts and exits
+  between two runs leaves no trace here, and one that sleeps through them is invisible
+  regardless of frequency.
+- **A baseline recorded after an infection blesses the infection.** The first run records
+  whatever is currently installed as normal. When it matters, read autostart mtimes
+  directly instead of trusting the diff.
+- **Sleeping implants.** A beacon that wakes every six hours is a normal-looking idle
+  process in between.
+- **Not EDR.** No memory inspection, no binary signing checks, no syscall tracing, no
+  network flow analysis. It is a tripwire for a known process shape.
+
+### The failure mode it refuses to have
+
+`BLIND` (exit 2) is a first-class verdict. An earlier version wrote its scratch snapshot
+to `TMPDIR`; when that write failed it compared the baseline against an empty file and
+reported every entry as removed and nothing as added — which on the axis that matters,
+newly added persistence, is indistinguishable from a clean host. A check that cannot run
+now says so as loudly as a finding, and exits non-zero.
+
+### If it reports CRITICAL
+
+Preserve, contain, hunt, then eradicate — in that order. Capture the full command line
+and the `ps` table first. Contain with `kill -STOP` before `kill -9`: a stopped process
+cannot execute a detached respawn, so containment is atomic even when several
+generations are alive, and the volatile state a `-9` destroys survives for analysis.
+Only then hunt persistence, verifying autostart and cron **mtimes** directly, and
+eradicate.
 
 ---
 

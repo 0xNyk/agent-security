@@ -92,10 +92,62 @@ scripts/repo-guard-install.sh --uninstall   # removes shim + hook, de-registers 
 `repo-guard:` — remove them by hand). Removing the shim alone disables the PATH guard
 immediately; `gh` then resolves to the real binary again.
 
+## Research-egress PreToolUse hook (optional, recommended)
+
+Hard-blocks unsafe fetches before `web_fetch` / `open_page` / `curl|wget` run.
+Uses `scripts/check-url.sh` under the hood. Installs on **Claude, Grok, Codex, and Hermes**.
+
+```sh
+scripts/research-egress-install.sh           # all hosts present on this machine
+scripts/research-egress-install.sh --status
+scripts/research-egress-install.sh --uninstall
+```
+
+| Host | What gets written |
+|---|---|
+| Claude | `~/.claude/hooks/block-research-egress.sh` + `settings.json` |
+| Grok | `~/.grok/hooks/research-egress.json` |
+| Codex | `~/.codex/hooks.json` + `features.hooks = true` |
+| Hermes | `~/.hermes/config.yaml` `hooks.pre_tool_call` + shell-hooks allowlist |
+
+Restart agent sessions after install. Policy: BLOCK always denied; REVIEW needs
+`RESEARCH_URL_OK='https://…'` exact match; ALLOW passes. See `safe-research.md`.
+
+## Scheduled runtime audit (optional, recommended)
+
+`runtime-audit.sh` runs read-only and needs no installation to use. Scheduling it is the
+part that matters: a point-in-time check whose trigger is "someone remembers to run it"
+fails the same way the incident it was written for did.
+
+```sh
+scripts/runtime-audit.sh                       # audit now, no install
+scripts/runtime-audit-install.sh               # schedule it, hourly by default
+scripts/runtime-audit-install.sh --interval 1800
+scripts/runtime-audit-install.sh --status      # exits 1 when not armed
+scripts/runtime-audit-install.sh --uninstall
+```
+
+| Platform | What gets installed |
+|---|---|
+| macOS | `~/Library/LaunchAgents/com.agent-security.runtime-audit.plist` (`StartInterval`), loaded with `launchctl` |
+| Linux with systemd | a user timer + service under `~/.config/systemd/user/` |
+| Otherwise | a `crontab` line |
+
+Findings append to `~/.local/state/agent-security/runtime-audit.log`. Intervals under
+300s are refused. Because adding a scheduler entry is itself autostart drift, the
+installer refreshes the audit's persistence baseline once and says so.
+
+Removal restores nothing else: `--uninstall` takes out only the scheduler entry, leaves
+the audit script alone, and reminds you to re-run `--update-baseline` so the removal is
+not reported as drift on the next audit.
+
 ## Dry-run everything first
 
 ```sh
 scripts/repo-guard-install.sh --with-hook --dry-run   # print actions, change nothing
 bash tests/test-scan.sh                                # scanner fixtures
 bash tests/test-guard.sh                               # guard fixtures (offline, fake gh)
+bash tests/test-research-egress-hook.sh                # fetch-gate fixtures
+scripts/runtime-audit-install.sh --dry-run             # scheduler actions, change nothing
+bash tests/run-all.sh                                  # every suite plus the self-scan
 ```

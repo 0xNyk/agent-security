@@ -222,6 +222,13 @@ HOMESEG_MAC="Users"
 HOME_RE="/(${HOMESEG_MAC})/[A-Za-z0-9._-]+|/home/[A-Za-z0-9._-]+|[A-Za-z]:\\\\+${HOMESEG_MAC}\\\\+[A-Za-z0-9._ -]+"
 NEUTRAL_HOME_RE="/(${HOMESEG_MAC}|home)/(example|user|users|username|yourname|you|jdoe|johndoe|janedoe|runner|__[a-z]+__|<[a-z-]+>)([^A-Za-z0-9._-]|$)"
 DOTDIR_RE='(~|\$HOME|%USERPROFILE%)/\.(ssh|aws)([^A-Za-z0-9]|$)|\.ssh/(id_[a-z0-9]+|config|known_hosts)|\.aws/credentials'
+# A hardcoded personal WORKSPACE root. HOME_RE only sees a literal /Users/<name> or
+# /home/<name>; it cannot see `$HOME/dev/some-private-repo`, which leaks both a machine
+# layout and — worse — the name of a sibling private repository into published code.
+# That exact shape shipped past HOME_RE once, which is why this rule exists.
+# Only workspace-shaped roots are listed: `$HOME/.config` and friends are legitimate and
+# must never match, so dot-directories are deliberately absent.
+WORKSPACE_RE='(~|\$HOME|\$\{HOME\}|%USERPROFILE%)/(dev|src|code|projects|Projects|work|repos|workspace|git)/'
 KEYBLOCK_RE='BEGIN [A-Z ]*PRIVATE KEY'
 TOKEN_RE='sk_live_[A-Za-z0-9]{8,}|sk_test_[A-Za-z0-9]{8,}|ghp_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{15,}|AIza[0-9A-Za-z_-]{30,}'
 ASSIGN_RE='(api[_-]?key|apikey|api[_-]?secret|client[_-]?secret|secret|token|passwd|password|bearer|credential|access[_-]?key|private[_-]?key|session[_-]?(id|key)|cookie)["'"'"']?[[:space:]]*[:=][[:space:]]*["'"'"'][A-Za-z0-9_+/=.-]{20,}'
@@ -235,10 +242,20 @@ COOKIE_RE='(Set-)?Cookie:[^=]{0,80}=[A-Za-z0-9+/=_-]{16,}'
 # blob, lone build config, or lone git hook never matches (keeps false positives
 # low so the gate is never disabled). Cross-file config<->.env splits are out of a
 # same-file regex's reach by design; see the SAME-FILE LIMITATION note above.
-EVALANCHOR_RE='eval[[:space:]]*\(|new[[:space:]]+Function[[:space:]]*\(|vm\.(runInContext|Script|compileFunction)[[:space:]]*\(|(^|[^.[:alnum:]_])import[[:space:]]*\(|(^|[^.[:alnum:]_])exec[[:space:]]*\(|(^|[^.[:alnum:]_])compile[[:space:]]*\(|__import__[[:space:]]*\(|Invoke-Expression|(^|[^A-Za-z-])IEX([^A-Za-z]|$)|-EncodedCommand'
+# `eval(` carries a left word boundary for the same reason `exec(`/`compile(` below do:
+# without one it matches any identifier ENDING in eval — is_inline_eval(, retrieval() —
+# which is a false-positive generator, worst of all in code that implements eval
+# detection. The boundary excludes alnum/underscore but deliberately still allows a
+# preceding dot, so window.eval( and vm.eval( keep matching. `xeval(` is a different
+# function, not an evasion.
+EVALANCHOR_RE='(^|[^[:alnum:]_])eval[[:space:]]*\(|new[[:space:]]+Function[[:space:]]*\(|vm\.(runInContext|Script|compileFunction)[[:space:]]*\(|(^|[^.[:alnum:]_])import[[:space:]]*\(|(^|[^.[:alnum:]_])exec[[:space:]]*\(|(^|[^.[:alnum:]_])compile[[:space:]]*\(|__import__[[:space:]]*\(|Invoke-Expression|(^|[^A-Za-z-])IEX([^A-Za-z]|$)|-EncodedCommand'
 # ENCODERS: base64 (atob/Buffer.from/*decode), hex + charCode + parseInt(_,16) +
 # fromhex, long \x / \u escape runs, string-reversal, and XOR-byte reconstruction.
-B64DECODE_RE='atob[[:space:]]*\(|Buffer\.from[[:space:]]*\([^)]*base64|base64[_-]?decode|b64decode|FromBase64String|String\.fromCharCode|\.charCodeAt[[:space:]]*\(|parseInt[[:space:]]*\([^)]*,[[:space:]]*16[[:space:]]*\)|bytes\.fromhex|\.fromhex[[:space:]]*\(|(\\x[0-9A-Fa-f]{2}){4,}|(\\u[0-9A-Fa-f]{4}){3,}|\.reverse[[:space:]]*\([[:space:]]*\)[[:space:]]*\.join|\^[[:space:]]*0x[0-9A-Fa-f]{1,2}'
+# The second Buffer.from alternative exists because the decoded argument is often a
+# nested call — Buffer.from(readFileSync(p), 'base64') — which a `[^)]*` pattern
+# stops short of. It stays precise by requiring the QUOTED encoding name, so a
+# stray "base64" elsewhere on a long/minified line does not match.
+B64DECODE_RE='atob[[:space:]]*\(|Buffer\.from[[:space:]]*\([^)]*base64|Buffer\.from[[:space:]]*\([^;]{0,120}["'"'"'](base64|hex)|base64[_-]?decode|b64decode|FromBase64String|String\.fromCharCode|\.charCodeAt[[:space:]]*\(|parseInt[[:space:]]*\([^)]*,[[:space:]]*16[[:space:]]*\)|bytes\.fromhex|\.fromhex[[:space:]]*\(|(\\x[0-9A-Fa-f]{2}){4,}|(\\u[0-9A-Fa-f]{4}){3,}|\.reverse[[:space:]]*\([[:space:]]*\)[[:space:]]*\.join|\^[[:space:]]*0x[0-9A-Fa-f]{1,2}'
 # NETEXEC: second-stage fetchers whose result is commonly piped into a sink.
 NETEXEC_RE='fetch[[:space:]]*\(|node-fetch|child_process|execSync[[:space:]]*\(|spawnSync[[:space:]]*\(|requests\.get[[:space:]]*\(|urllib\.request|Invoke-WebRequest|Invoke-RestMethod'
 # Same-file fetch/decode-then-exec dataflow tells (fire on their own).
@@ -351,6 +368,7 @@ scan_file() {
   # PATH (MAJOR)
   record PATH "$f" "$(grep -nE "$HOME_RE" "$c" | grep -vE "$NEUTRAL_HOME_RE" | apply_allow || true)"
   record PATH "$f" "$(grep -nE "$DOTDIR_RE" "$c" | apply_allow || true)"
+  record PATH "$f" "$(grep -nE "$WORKSPACE_RE" "$c" | apply_allow || true)"
 
   # INFRA (MAJOR)
   record INFRA "$f" "$(grep -nE "$PRIVIP_RE" "$c" | grep -vE '0\.0\.0\.0|/([89]|1[0-9]|2[0-9]|3[0-2])([^0-9]|$)' | apply_allow || true)"

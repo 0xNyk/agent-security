@@ -1,6 +1,6 @@
 # Threat model
 
-Two threat classes motivated this skill. Both are drawn from real incidents; both
+Four threat classes motivated this skill. All are drawn from real incidents; all
 are described here generically, and every claim points at a **public** primary source.
 
 Defensive-documentation note: this file names encoder and sink tokens as taxonomy,
@@ -93,11 +93,73 @@ repository — the confirmation has to name the same repo the command will hit.
 
 ---
 
+## Class 3 — unsafe research egress
+
+**What it is.** An agent doing research decides what to open. Left ungated it will click
+every search result, follow in-page links, open PDFs and archives from unknown hosts, and
+retrieve files whose only purpose is to be executed. The URL is the last point where a
+cheap, deterministic decision is still possible: after the fetch, the content is already
+in context and the only remaining defence is how the agent treats it.
+
+**Why the URL and not the content.** Content inspection happens after retrieval. Retrieval
+is itself the risky act for an executable, an archive, a `file:` read, or a `javascript:`
+scheme — and for a URL carrying credentials in its userinfo, the request leaks them
+whatever the response says. A URL classifier is strictly cheaper and strictly earlier.
+
+**What this ships.** `check-url.sh` classifies from URL shape alone, with no network call,
+and `research-egress-install.sh` wires it as a PreToolUse gate so the decision runs before
+the fetch tool or `curl`/`wget` executes. `BLOCK` is unconditional; `REVIEW` requires an
+explicit operator token naming the exact URL.
+
+**The honest boundary.** Shape is not reputation. A compromised well-known domain serving a
+poisoned page classifies as `ALLOW`, correctly and uselessly. The hook only covers the tools
+its matcher names. And the behavioural half — prefer primary sources, cap fetches per
+question, do not spray-click — is a discipline no hook enforces. See `safe-research.md`.
+
+---
+
+## Class 4 — an implant already running on the host
+
+**What it is.** Malware that arrives outside every gate. It is not committed to a
+repository, so a repository scanner never sees it. It does not pass through an agent tool
+call, so a tool hook never sees it. It is delivered by something that already runs code on
+the machine — a package lifecycle script, a build step, a headless worker — and then it
+detaches, its parent exits, and it beacons.
+
+**Why gate-based controls cannot see it.** This is the structural point, and it is the
+reason this class is in the threat model at all. Every other control in this project sits
+on a path: content entering a repository, content entering an agent's context, a command
+about to run. A control on a path only sees what takes the path. A command-line implant
+ran for four and a half days on a machine where every one of those controls was installed
+and reporting healthy — and each of those reports was true. They were answering "are my
+gates wired?", and nobody was asking "is something already running?".
+
+**What this ships.** `runtime-audit.sh`: inline-eval interpreter processes, dropper markers
+co-occurring in one command line, orphaned PPID-1 interpreters, and autostart + shell
+profile drift against a recorded baseline.
+
+**The honest boundary.** It reads command lines, so an implant that execs from a file or
+rewrites its `argv` is invisible. It is point-in-time and nothing schedules it. A baseline
+first recorded after an infection treats the infection as normal. It is not EDR — no memory
+inspection, no signing checks, no flow analysis. It is a tripwire for a known shape, and
+the four-and-a-half-day gap is the honest measure of what a manual, point-in-time check
+costs.
+
+---
+
 ## The generalization
 
 The dropper is `base64` + `eval` + `.env` + `config` + `template` — one cell. Detection has
 to generalize on all five axes at once (encoder, sink, carrier, hiding spot, delivery). The
 repo-destruction class is simpler but sharper: bound the blast radius of irreversible
-authority with a per-target human gate. This skill ships a Tier-1 answer to the first and a
-practical guard for the second; neither is a complete program. Read `coverage-and-limits.md`
-before you rely on either.
+authority with a per-target human gate. Egress is earlier and cheaper than either: decide
+before you fetch, because after you fetch the decision is already made.
+
+The fourth class generalizes differently, and it is the one worth carrying away. Classes 1
+through 3 are all controls **on a path** — and a control on a path is blind to anything that
+does not take the path. Adding more path-controls never closes that gap; it only makes the
+green report more convincing. The only way to see the fourth class is to stop asking whether
+the gates are wired and start looking at the machine itself.
+
+This skill ships a Tier-1 answer to each and a complete program to none. Read
+`coverage-and-limits.md` before you rely on any of it.

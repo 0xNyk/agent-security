@@ -25,6 +25,17 @@
 #   'const u = atob\(process\.env\.CFG_URL'      → test-vet.sh synthetic vite-config fixture
 #   'eval\(await \(await fetch\(u\)\)\.text'     → test-vet.sh synthetic vite-config fixture
 #   '_0x1a2b3c=1;'                               → test-vet.sh synthetic committed-config-worm fixture
+#
+# The runtime audit adds four. Its detector patterns live in scripts/runtime-audit.sh,
+# which is written to avoid literal sink syntax, so only these need allowing:
+#   'Dropper markers in a command line'          → coverage-and-limits.md taxonomy row
+#   'node -e const\{spawn\}='                    → test-runtime-audit.sh inert ps fixture
+#   'python3 -c import urllib\.request'          → test-runtime-audit.sh inert ps fixture
+#   'node --experimental-vm-modules -e'          → test-runtime-audit.sh inert ps fixture
+#   'python3 -W ignore -c'                       → test-runtime-audit.sh inert ps fixture
+# Every one is a STRING INSIDE A HEREDOC written to a temp file and fed to the audit via
+# --ps-file. Nothing executes them; they exist so the detector has something to detect.
+#
 # If any OTHER finding appears, this exits non-zero — the allow-list is intentionally tight.
 set -euo pipefail
 
@@ -40,4 +51,9 @@ exec bash "$ROOT/scripts/scan-repo.sh" --all --markers /dev/null \
   --allow 'POISONED template: install-time postinstall' \
   --allow 'const u = atob\(process\.env\.CFG_URL' \
   --allow 'eval\(await \(await fetch\(u\)\)\.text' \
-  --allow '_0x1a2b3c=1;'
+  --allow '_0x1a2b3c=1;' \
+  --allow 'Dropper markers in a command line' \
+  --allow 'node -e const\{spawn\}=' \
+  --allow 'python3 -c import urllib\.request' \
+  --allow 'node --experimental-vm-modules -e' \
+  --allow 'python3 -W ignore -c'

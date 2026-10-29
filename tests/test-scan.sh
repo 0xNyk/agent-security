@@ -262,6 +262,35 @@ R="$TMP/wormreqneg"; new_repo "$R"
 printf 'const http = require("http");\nmodule.exports = {};\n' >"$R/vite.config.js"
 git -C "$R" add -A
 run_expect "ordinary require() stays clean" "$R" 0 --all
+# 13) Nested-call decode feeding an exec sink, with NO network stage. This was a
+# real miss: the encoder pattern stopped at the first ')', so the nested argument
+# hid the decode and only the fetcher clause was catching this class.
+R="$TMP/nested"; new_repo "$R"
+printf 'const s = require("fs").readFileSync("/tmp/.cache", "utf8");\neval(Buffer.from(decodeURIComponent(s), "base64").toString());\n' >"$R/stage2.js"
+git -C "$R" add -A
+run_expect "nested decode + exec sink, no fetch, is caught" "$R" 1 --all
+expect_in_output "DROPPER class labeled" "[DROPPER"
+
+# 14) A hardcoded personal workspace root. This leaks a machine layout and, when the
+# next path segment is a private repository name, leaks that too. It shipped past the
+# /Users/<name> rule once, because "$HOME/dev/..." contains no literal home path.
+R="$TMP/workspace"; new_repo "$R"
+printf 'CANDIDATES="$HOME/dev/internal-tooling/scripts/helper.sh"\n' >"$R/lookup.sh"
+git -C "$R" add -A
+run_expect "hardcoded workspace root is flagged" "$R" 1 --all
+expect_in_output "PATH class labeled" "[PATH"
+
+# ...and config/cache dotdirs under $HOME are ordinary and must stay clean.
+R="$TMP/workspaceneg"; new_repo "$R"
+printf 'CFG="${XDG_CONFIG_HOME:-$HOME/.config}/agent-security/allowlist.txt"\nCACHE="$HOME/.cache/tool"\n' >"$R/paths.sh"
+git -C "$R" add -A
+run_expect "\$HOME dotdir config paths stay clean" "$R" 0 --all
+
+# ...and the tightened pattern must not fire on a bare mention of the word.
+R="$TMP/nestedneg"; new_repo "$R"
+printf 'export const doc = "pass base64 to Buffer.from when decoding";\nexport function run(c){ return eval(c); }\n' >"$R/docs.js"
+git -C "$R" add -A
+run_expect "prose mentioning base64 near an eval stays clean" "$R" 0 --all
 
 echo "---"
 if [[ "$FAILURES" -eq 0 ]]; then

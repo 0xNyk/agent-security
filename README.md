@@ -4,13 +4,15 @@
 
 # agent-security
 
-Deterministic safety gates for repositories touched by coding agents and automation.
+Deterministic safety gates for repositories and machines touched by coding agents and automation.
 
-`agent-security` checks code on both sides of the trust boundary: material entering your workspace and material leaving it for a public repository. It also trips on known prompt-injection shapes, blocks common destructive `gh` commands until a human confirms the exact repository, and audits whether the active GitHub credential can still delete one.
+`agent-security` checks code on both sides of the trust boundary: material entering your workspace and material leaving it for a public repository. It also trips on known prompt-injection shapes, classifies URLs before an agent fetches them, blocks common destructive `gh` commands until a human confirms the exact repository, and audits whether the active GitHub credential can still delete one.
+
+Gates only see what passes through them. One control here looks at the machine instead: `runtime` audits what is already running, because an implant that arrives outside every gate is invisible to all of them.
 
 Every result includes its limit. `CLEAN` means no known pattern matched. It does not mean safe.
 
-[Quickstart](#sixty-second-start) · [Control map](#five-controls-one-boundary) · [Limits](#read-the-boundary-before-the-verdict) · [Blueprints](docs/blueprints.md) · [Security](SECURITY.md)
+[Quickstart](#sixty-second-start) · [Control map](#seven-controls-one-boundary) · [Limits](#read-the-boundary-before-the-verdict) · [Blueprints](docs/blueprints.md) · [Security](SECURITY.md)
 
 ## Sixty-second start
 
@@ -28,31 +30,44 @@ scripts/vet-incoming.sh ../candidate
 
 # Before an agent processes fetched or pasted content
 scripts/scan-content.sh ../fetched-page.txt
+
+# Before an agent fetches a URL — ALLOW (0), REVIEW (1), BLOCK (2)
+scripts/check-url.sh 'https://cdn.example/dataset.zip'
+
+# Anytime: what is already running, and has autostart changed?
+scripts/runtime-audit.sh
 ```
 
 The core scripts require Bash and Git. Python 3 handles invisible-Unicode checks, hook parsing, and installer JSON edits.
 
-## Five controls, one boundary
+## Seven controls, one boundary
 
 | Control | Run it when | Decision |
 |---|---|---|
+| [`check-url`](SKILL.md#check-url--safe-research--pre-fetch-egress-discipline) | An agent is about to fetch a URL, open a page, or download a file. | Returns `ALLOW`, `REVIEW`, or `BLOCK` from URL shape alone; the optional PreToolUse hook enforces it. |
 | [`scan`](SKILL.md#scan--leak--dropper-gate) | You are about to publish or push a repository. | Blocks credential shapes, private context, invisible Unicode, and same-file decode-to-exec patterns. |
 | [`vet`](SKILL.md#vet--vet-inbound-third-party-code-before-adoption) | You cloned code but have not installed or executed it. | Returns `ADOPT`, `REVIEW`, or `REJECT`; never runs the candidate. |
 | [`scan-content`](SKILL.md#scan-content--untrusted-content-tripwire-known-patterns-only) | An agent is about to read fetched, pasted, tool, or MCP output. | Flags known instruction-override, exfiltration, credential-solicitation, and covert-action shapes. |
 | [`guard`](SKILL.md#guard-install--repository-lifecycle-guard) | An agent or automation can call GitHub CLI. | Stops destructive repository operations until repo-specific confirmation is present. |
 | [`harden`](SKILL.md#harden--audit-the-real-destructive-capability-surface) | You need to know what the active GitHub credential and policy can destroy. | Reports `OK`, `HIGH`, or `UNKNOWN` without changing GitHub. |
+| [`runtime`](SKILL.md#runtime--audit-what-is-already-running) | You want to know what is already running on the machine, not just what passed a gate. | Flags command-line implant shapes and autostart drift; `BLIND` when a check could not run. |
 
 ```mermaid
 flowchart LR
     inbound[Untrusted code] --> vet[vet]
     vet --> workspace[Working repository]
-    content[Fetched content] --> tripwire[scan-content]
+    workspace --> egress[check-url]
+    egress --> web[(Web)]
+    web --> content[Fetched content]
+    content --> tripwire[scan-content]
     tripwire --> workspace
     workspace --> scan[scan]
     scan --> outbound[Public boundary]
     agent[Agent with gh] --> guard[guard]
     guard --> github[GitHub]
     harden[harden] -. audits capability .-> github
+    host[(This machine)] --> runtime[runtime]
+    runtime -. sees what no gate does .-> host
 ```
 
 ## Protect destructive GitHub operations
@@ -69,6 +84,31 @@ Run `scripts/harden-check.sh` without `--offline` for best-effort organization-p
 
 The guard is deliberately repo-specific. Rename, transfer, delete, archive, and visibility changes remain blocked until the operator supplies the confirmation described in [destructive-operations prevention](references/destructive-ops-prevention.md).
 
+## Gate what an agent fetches
+
+`check-url.sh` classifies a URL from its shape alone, with no network call. The optional installer wires it as a PreToolUse hook so the decision runs *before* a fetch tool or a `curl`/`wget` shell command executes:
+
+```sh
+scripts/research-egress-install.sh
+scripts/research-egress-install.sh --status
+```
+
+`BLOCK` is always denied — executables, archives, `file:`/`javascript:`/`data:` schemes, credentials in the URL, loopback hosts. `REVIEW` is denied unless the operator sets `RESEARCH_URL_OK` to the exact URL, which covers PDFs, plain HTTP, IP literals, punycode hosts, shorteners, and file lockers. Restart agent sessions after installing.
+
+The hook is the mechanical half. The behavioural half — prefer primary sources, cap fetches per question, do not spray-click search results — is a discipline described in [safe research](references/safe-research.md), and no hook enforces it.
+
+## Watch the machine, not just the gates
+
+Every control above sits on a path: content entering a repository, content entering an agent's context, a command about to run. A control on a path cannot see anything that does not take the path. `runtime-audit.sh` looks at the host itself — inline-eval processes, dropper markers in command lines, orphaned interpreters, and autostart drift against a recorded baseline.
+
+```sh
+scripts/runtime-audit.sh                  # audit now
+scripts/runtime-audit-install.sh          # run it hourly, unattended
+scripts/runtime-audit-install.sh --status # exits 1 when not armed
+```
+
+Schedule it. A manual audit only reports what was running at the moment someone decided to look, and deciding to look is exactly the step that fails. Findings append to `~/.local/state/agent-security/runtime-audit.log`.
+
 ## Read the boundary before the verdict
 
 These tools are Tier 1 tripwires: early, deterministic, and explainable. They do not replace code review, least privilege, provenance checks, or server-side policy.
@@ -78,6 +118,8 @@ These tools are Tier 1 tripwires: early, deterministic, and explainable. They do
 - `scan-content` is easy to evade with new wording, encoding, translation, or instructions split across lines. Treat fetched content as data and restrict agent capabilities.
 - The `gh` guard is a local brake. An unguarded binary or direct API client can bypass it. Token permissions and organization policy are the durable controls.
 - `harden` returns `UNKNOWN` when capability cannot be inspected. Unknown is not clear.
+- `check-url` reads URL strings, not reputation. A compromised well-known domain still returns `ALLOW`, and the hook only covers the tools its matcher names.
+- `runtime` reads command lines, not memory. An implant that execs from a file, rewrites its `argv`, or sleeps between beacons does not appear. Scheduling changes how often it looks, never how deeply.
 
 The [coverage matrix and bypass table](references/coverage-and-limits.md) state what each detector sees, misses, and delegates to a stronger control.
 
@@ -92,19 +134,18 @@ The project does not collect telemetry or send scanned content anywhere. URL-bas
 The fixture suites create dangerous-looking examples only inside temporary repositories. They do not execute payloads or call external services.
 
 ```sh
-for test in test-scan test-vet test-harden test-scan-content test-guard self-scan; do
-  bash "tests/$test.sh" || exit 1
-done
+bash tests/run-all.sh
 
-shellcheck -S warning scripts/*.sh scripts/repo-guard/*.sh tests/*.sh
+shellcheck -S warning scripts/*.sh scripts/repo-guard/*.sh scripts/research-egress/*.sh tests/*.sh
 gitleaks git --no-banner --redact .
 ```
+
+`run-all.sh` discovers every `tests/test-*.sh` rather than reading a list, so a suite cannot be added and then silently left out of the run. CI runs the same command.
 
 Detector changes need a positive fixture, a neighboring clean fixture, and a written limit. Read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing one. Send exploitable bypasses through the private route in [SECURITY.md](SECURITY.md); use [SUPPORT.md](SUPPORT.md) for ordinary questions.
 
 ## Status and license
 
-Experimental, maintained as capacity permits, and released under the [MIT License](LICENSE). The current release line is `0.1.x`. Release checks live in [RELEASE.md](RELEASE.md); engineering decisions and visual provenance live in the [field notes](docs/field-notes.md) and [brand guide](docs/brand.md).
 
 ---
 
@@ -115,3 +156,4 @@ Quiet commercial paths from [nyk.dev](https://www.nyk.dev) — same operator, fi
 - Free checklist: https://www.nyk.dev/resources/agent-os-checklist?utm_source=github&utm_medium=readme&utm_campaign=oss_proof&utm_content=agent-security
 - Self-serve Production Agent OS Kit (€149 founding): https://www.nyk.dev/go/agent-os-kit?utm_source=github&utm_medium=readme&utm_campaign=oss_proof&utm_content=agent-security
 - Hands-on packages: https://www.nyk.dev/consulting?utm_source=github&utm_medium=readme&utm_campaign=oss_proof&utm_content=agent-security#agent-os
+Experimental, maintained as capacity permits, and released under the [MIT License](LICENSE). The current release line is `0.2.x`. Release checks live in [RELEASE.md](RELEASE.md); engineering decisions and visual provenance live in the [field notes](docs/field-notes.md) and [brand guide](docs/brand.md).

@@ -71,3 +71,36 @@ flowchart LR
 
 Detection supports this flow but does not enforce it. The behavioral contract lives in [untrusted content](../references/untrusted-content.md).
 
+
+## Research egress
+
+```mermaid
+flowchart LR
+    intent[Agent intends to fetch a URL] --> classify[check-url]
+    classify -->|ALLOW| fetch[Fetch]
+    classify -->|REVIEW| operator{Operator names the exact URL?}
+    classify -->|BLOCK| refuse[Never fetched]
+    operator -->|yes| fetch
+    operator -->|no| refuse
+    fetch --> content[Fetched content]
+    content --> tripwire[scan-content]
+```
+
+The decision happens before retrieval, from the URL string alone. `BLOCK` has no override; `REVIEW` has one, and it must name the exact URL. Whatever comes back is still untrusted data.
+
+## Host runtime
+
+```mermaid
+flowchart TD
+    gates[Gate controls: scan, vet, scan-content, check-url, guard] --> paths[See only what crosses their path]
+    delivery[Lifecycle script, build step, headless worker] --> implant[Detached process]
+    implant -. never crosses a gate .-> paths
+    implant --> host[(Running host)]
+    host --> audit[runtime-audit]
+    audit --> proc[Command-line shapes]
+    audit --> drift[Autostart and profile drift vs baseline]
+    proc --> verdict{CRIT, WARN, BLIND, or clean}
+    drift --> verdict
+```
+
+This is the one blueprint where the arrow that matters is the dotted one. A control on a path cannot see what never takes the path, so no amount of gate coverage substitutes for looking at the machine. `runtime-audit` looks at the machine — manually, at a single moment, at known command-line shapes. Schedule it, or it only ever confirms what you already suspected.

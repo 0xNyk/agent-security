@@ -17,16 +17,13 @@ Contributions should make a defensive boundary easier to inspect, test, or enfor
 ## Before you open a PR
 
 ```bash
-bash tests/test-scan.sh          # leak/dropper scanner fixtures
-bash tests/test-vet.sh           # inbound vetting fixtures (poisoned template -> REJECT)
-bash tests/test-harden.sh        # harden-check scope-parsing (mock gh auth status, offline)
-bash tests/test-scan-content.sh  # untrusted-content tripwire fixtures
-bash tests/test-guard.sh         # guard, offline fake gh
-bash tests/self-scan.sh          # this repo must be clean under its own scanner
+bash tests/run-all.sh            # every tests/test-*.sh, plus the repo self-scan
 ```
 
-All six must pass (CI runs the same set). If you add a detection class, add both a
-positive fixture (it fires) and a negative fixture (it does not false-positive).
+Every suite must pass; CI runs this exact command. `run-all.sh` discovers suites from
+disk rather than a list, so a new `tests/test-*.sh` is picked up automatically — you do
+not need to register it anywhere. If you add a detection class, add both a positive
+fixture (it fires) and a negative fixture (it does not false-positive).
 
 Also run:
 

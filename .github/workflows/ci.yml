@@ -20,25 +20,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Scanner fixture tests
-        run: bash tests/test-scan.sh
-
-      - name: Inbound-vetting fixture tests (poisoned template -> REJECT)
-        run: bash tests/test-vet.sh
-
-      - name: Harden-check scope-parsing tests (offline, mock gh auth status)
-        run: bash tests/test-harden.sh
-
-      - name: Untrusted-content scanner fixture tests
-        run: bash tests/test-scan-content.sh
-
-      - name: Repo-guard tests (offline, fake gh)
-        run: bash tests/test-guard.sh
-
-      - name: Self-scan (repo must be clean under its own scanner)
-        run: bash tests/self-scan.sh
+      # One step on purpose. This used to be a hand-written list of suites, and two
+      # suites shipped without ever being added to it. run-all.sh discovers every
+      # tests/test-*.sh, so a new suite is covered the moment it exists.
+      - name: Test suites (discovered) + self-scan
+        run: bash tests/run-all.sh
 
       - name: Shell lint (shellcheck)
         run: |
           sudo apt-get update -qq && sudo apt-get install -y shellcheck
-          shellcheck -S warning scripts/*.sh scripts/repo-guard/*.sh tests/*.sh
+          shellcheck -S warning \
+            scripts/*.sh \
+            scripts/repo-guard/*.sh \
+            scripts/research-egress/*.sh \
+            tests/*.sh

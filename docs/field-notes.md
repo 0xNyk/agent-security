@@ -39,6 +39,54 @@ The durable controls remain outside this repository:
 - protect important branches from force-push and deletion;
 - keep recovery authority separate from routine automation.
 
+## A control on a path is blind to whatever avoids the path
+
+The first release shipped five gates and each one sat on a route: content entering a
+repository, content entering an agent's context, a command about to run. That framing has
+a hole with a precise shape. Anything delivered by something already executing on the
+machine takes none of those routes, so no gate has an opinion about it, and every gate
+still reports healthy. The reports are not wrong. They answer "are the gates wired",
+which is a different question from "is something already running".
+
+Adding a sixth gate would not have closed this. The fix had to look at the host instead,
+which is why `runtime-audit` reads the process table rather than a stream.
+
+## Precision is a security property, not housekeeping
+
+The first version of the runtime audit matched one regular expression across an entire
+command line. It reported a development server as an implant, because a `-p 3011` port
+flag belonging to a package manager looked exactly like the interpreter's own print-eval
+flag. The detection now walks tokens and stops at the script path, since every flag after
+it belongs to the script.
+
+This mattered more than the usual false-positive complaint. The audit was about to be
+scheduled hourly. A tool that reports the same harmless process every hour trains its
+reader to skim, then to filter, then to switch it off, and a disabled detector detects
+nothing. Noise is not a cosmetic failure in a scheduled control; it is the failure.
+
+## Scheduling is what turns a script into a control
+
+A point-in-time check whose trigger is "someone decides to look" inherits the failure
+mode of whatever it was written to catch. Writing the detector feels like closing the
+incident, and it is not: detection and eradication are separate steps, and so are
+detection and *recurring* detection. `runtime-audit-install.sh` exists so the trigger is
+a timer rather than a memory.
+
+Its `--status` reads the interval back out of the installed scheduler entry instead of
+restating what was typed at install time. A status line that cannot tell a 30-minute
+cadence from a 60-minute one is decoration.
+
+## The scanner cannot know which names are private
+
+Path rules match personal directories by shape, so they caught a literal home path and
+missed a home-relative workspace root followed by a repository name. Two real leaks
+reached the release candidate through exactly that gap:
+a fallback path naming a private sibling repository, and a personal workspace layout in an
+installer. The shape rule now covers workspace roots, but the general case is unfixable by
+shape alone, because privacy is a fact about your context rather than about the string.
+That is what the marker file is for, and the release checklist now carries an explicit
+grep step described as the step the tooling cannot do for you.
+
 ## Maintainer notebook
 
 When a detector changes, record four facts in the pull request:
