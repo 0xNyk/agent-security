@@ -76,6 +76,30 @@ Its `--status` reads the interval back out of the installed scheduler entry inst
 restating what was typed at install time. A status line that cannot tell a 30-minute
 cadence from a 60-minute one is decoration.
 
+## Agent configs are the new autostart
+
+Every 2026 worm that reached this project's indicator list persisted somewhere a developer
+does not read: a `setup.mjs` under `.claude/` or `.vscode/`, a `folderOpen` task, a
+`SessionStart` hook, an MCP server entry whose command fetches and executes. These files
+are autostart for agents the way plists and cron are autostart for the OS, and they were
+being treated as preferences. The sweep now hashes the home agent configs and reads the
+`hooks` object of every repository agent config, which is the same baseline-and-drift
+model `runtime` applies to launchd.
+
+The precision lesson repeated itself. The first version read whole settings files and
+flagged permission allowlists that merely named `curl`; a permission to run a command is
+not a hook that runs it. Reading only the `hooks` object removed every false positive and
+lost no true one.
+
+## A list is honest about being a list
+
+The indicator sweep is the least clever control here and the one most likely to fire
+first, because the campaigns it covers reuse paths and filenames across months. Its
+weakness is stated in its name: it catches what has been published. The reason to ship it
+anyway is that the alternative, waiting until the loader is a running process, is the
+four-and-a-half-day gap again. Append to the list when a report lands; do not wait for
+the sweep to learn.
+
 ## The scanner cannot know which names are private
 
 Path rules match personal directories by shape, so they caught a literal home path and

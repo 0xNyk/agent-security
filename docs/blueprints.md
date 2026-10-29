@@ -104,3 +104,25 @@ flowchart TD
 ```
 
 This is the one blueprint where the arrow that matters is the dotted one. A control on a path cannot see what never takes the path, so no amount of gate coverage substitutes for looking at the machine. `runtime-audit` looks at the machine — manually, at a single moment, at known command-line shapes. Schedule it, or it only ever confirms what you already suspected.
+
+## On-disk indicators
+
+```mermaid
+flowchart TD
+    publish[Compromised release, hijacked Action tag, worm loader] --> disk[(Installed, dormant)]
+    disk -. not a process yet .-> runtime[runtime-audit sees nothing]
+    disk --> sweep[ioc-sweep]
+    list[ioc-indicators.txt] --> sweep
+    sweep --> locks[Lockfiles, manifests, caches]
+    sweep --> paths[Drop paths, loaders, tmp staging]
+    sweep --> actions[Workflows: Action refs not SHA-pinned]
+    sweep --> cfg[Repo + home agent configs vs baseline]
+    locks --> verdict{findings, clean, or BLIND}
+    paths --> verdict
+    actions --> verdict
+    cfg --> verdict
+```
+
+The blueprint is a list and a walk. Everything it knows comes from the indicator file, so
+it is only as current as the last line appended, and it says so by exiting `1` on a match,
+`0` on none, and `2` when it could not look.

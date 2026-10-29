@@ -147,6 +147,41 @@ costs.
 
 ---
 
+## Class 5 — a published compromise that is already on the disk
+
+**What it is.** The 2026 campaigns against developers rarely need a novel exploit. They
+publish a compromised release of a package people already depend on (axios, litellm,
+lightning, a Rust crate), repoint the tags of a GitHub Action thousands of workflows
+reference, or run a worm that steals a maintainer token and republishes every package it
+can reach with a loader attached. The loader then persists where developers no longer
+look: a `setup.mjs` in `.claude/` or `.vscode/`, a `folderOpen` task, a `SessionStart`
+hook in an agent settings file, an MCP server entry that fetches and executes. Several
+also create a repository under the victim's own account to receive what was stolen.
+
+**Why the other controls do not see it.** `vet` runs once, before adoption, on a template
+you chose to look at. `scan` reads your own changes. `runtime` sees the loader only while
+it runs, and most of these run for seconds at install or session start. Between delivery
+and execution the compromise is a file on disk that nothing here was reading.
+
+**What this ships.** `ioc-sweep.sh` and a plain-text indicator list: compromised releases
+by exact version across npm, PyPI and crates.io; malicious package names; loader paths,
+basenames and tmp staging names; hijacked actions used by anything other than a full
+commit SHA; the decode-then-exec config dropper shape outside package stores; agent and
+IDE config injection in repositories; and a hash baseline of the home agent configs.
+
+**The honest boundary.** It is a list, and a list is always behind the attacker by one
+publication. It tells you what landed, not what is safe. The durable controls are the
+boring ones: lifecycle scripts off by default, full-SHA pins, minimal token scope, and
+reading the agent config files an installer just wrote.
+
+**Sources.** Microsoft on ChainDrop (August 2026); Phoenix Security on TeamPCP and the Nx
+Console extension; The Hacker News on the Apex fake accelerator, the Hades PyPI set, and
+the actions-cool / trivy-action tag hijacks; Huntress on the axios compromise; Iru on
+Rustbot; Rescana on the reactivated compromised actions; Help Net Security on the npm
+trusted-publishing flaw.
+
+---
+
 ## The generalization
 
 The dropper is `base64` + `eval` + `.env` + `config` + `template` — one cell. Detection has
@@ -160,6 +195,11 @@ through 3 are all controls **on a path** — and a control on a path is blind to
 does not take the path. Adding more path-controls never closes that gap; it only makes the
 green report more convincing. The only way to see the fourth class is to stop asking whether
 the gates are wired and start looking at the machine itself.
+
+The fifth class is the fourth class one step earlier. A compromise that has landed but
+not yet run is on the disk, not in the process table, and the only way to see it is to
+know what it is called and go looking. That is a list, and a list is honest about being
+one: it catches what was published and nothing else.
 
 This skill ships a Tier-1 answer to each and a complete program to none. Read
 `coverage-and-limits.md` before you rely on any of it.

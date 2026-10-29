@@ -36,11 +36,14 @@ scripts/check-url.sh 'https://cdn.example/dataset.zip'
 
 # Anytime: what is already running, and has autostart changed?
 scripts/runtime-audit.sh
+
+# Daily: did a published supply-chain compromise land on this disk?
+scripts/ioc-sweep.sh
 ```
 
 The core scripts require Bash and Git. Python 3 handles invisible-Unicode checks, hook parsing, and installer JSON edits.
 
-## Seven controls, one boundary
+## Eight controls, one boundary
 
 | Control | Run it when | Decision |
 |---|---|---|
@@ -51,6 +54,7 @@ The core scripts require Bash and Git. Python 3 handles invisible-Unicode checks
 | [`guard`](SKILL.md#guard-install--repository-lifecycle-guard) | An agent or automation can call GitHub CLI. | Stops destructive repository operations until repo-specific confirmation is present. |
 | [`harden`](SKILL.md#harden--audit-the-real-destructive-capability-surface) | You need to know what the active GitHub credential and policy can destroy. | Reports `OK`, `HIGH`, or `UNKNOWN` without changing GitHub. |
 | [`runtime`](SKILL.md#runtime--audit-what-is-already-running) | You want to know what is already running on the machine, not just what passed a gate. | Flags command-line implant shapes and autostart drift; `BLIND` when a check could not run. |
+| [`ioc`](SKILL.md#ioc--sweep-what-is-installed-on-disk) | A supply-chain compromise was published and you want to know whether its known artefacts are on this disk. | Matches a list of published indicators on disk: compromised npm / PyPI / crates.io releases, worm loaders, hijacked Actions used by tag, injected agent configs. |
 
 ```mermaid
 flowchart LR
@@ -68,6 +72,8 @@ flowchart LR
     harden[harden] -. audits capability .-> github
     host[(This machine)] --> runtime[runtime]
     runtime -. sees what no gate does .-> host
+    disk[(This disk)] --> ioc[ioc]
+    ioc -. matches published indicators .-> disk
 ```
 
 ## Protect destructive GitHub operations
@@ -109,6 +115,13 @@ scripts/runtime-audit-install.sh --status # exits 1 when not armed
 
 Schedule it. A manual audit only reports what was running at the moment someone decided to look, and deciding to look is exactly the step that fails. Findings append to `~/.local/state/agent-security/runtime-audit.log`.
 
+`runtime` sees processes. `ioc-sweep.sh` sees what is installed and dormant: a compromised release in a lockfile or package cache, a worm loader in `.claude/` or `.vscode/`, a GitHub Action used by a tag that was repointed, a `SessionStart` hook committed into a repository's agent config, or drift in your own home agent configs. The indicators are a plain text file, one line each, so a newly published campaign is a one-line append.
+
+```sh
+scripts/ioc-sweep.sh                  # exit 0 clean, 1 findings, 2 BLIND
+scripts/ioc-sweep.sh --accept-config  # after you deliberately change a home agent config
+```
+
 ## Read the boundary before the verdict
 
 These tools are Tier 1 tripwires: early, deterministic, and explainable. They do not replace code review, least privilege, provenance checks, or server-side policy.
@@ -120,6 +133,7 @@ These tools are Tier 1 tripwires: early, deterministic, and explainable. They do
 - `harden` returns `UNKNOWN` when capability cannot be inspected. Unknown is not clear.
 - `check-url` reads URL strings, not reputation. A compromised well-known domain still returns `ALLOW`, and the hook only covers the tools its matcher names.
 - `runtime` reads command lines, not memory. An implant that execs from a file, rewrites its `argv`, or sleeps between beacons does not appear. Scheduling changes how often it looks, never how deeply.
+- `ioc` matches names, paths, versions, and shapes from public reporting. A renamed payload or a compromise published after the indicator list was last updated walks past it, and only a full-SHA pin protects you from the next Action tag repoint.
 
 The [coverage matrix and bypass table](references/coverage-and-limits.md) state what each detector sees, misses, and delegates to a stronger control.
 

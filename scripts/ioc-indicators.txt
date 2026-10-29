@@ -1,0 +1,145 @@
+# Indicators for scripts/ioc-sweep.sh. One per line: KIND<TAB>VALUE<TAB>note
+# KIND:
+#   PATH     a path relative to $HOME that should not exist
+#   FILENAME an exact basename that should not exist anywhere under the scanned roots
+#   NPMPKG   an npm package name that should not appear in any lockfile
+#   WORKFLOW a token that should not appear in any .github/workflows file
+#   SHELLCMD a regex (grep -E) that marks a shell-history line as a lure shape; the
+#            match prints only the pattern name and host, never the command
+#   ABSPATH  an absolute path that should not exist
+#   REPOPATH a path suffix (dir/file) that should not exist inside any working tree
+#   TMPGLOB  a directory/file glob that should not exist directly under a tmp dir
+#   NPMVER   name<TAB>version: a specific compromised npm release (lockfiles, node_modules, caches)
+#   PYPKG    a PyPI package name that should not be installed or locked anywhere
+#   PYVER    name<TAB>version: a specific compromised PyPI release
+#   CRATE    a crates.io name that should not be in any Cargo.lock or the cargo registry
+#   CRATEVER name<TAB>version: a specific hijacked crate release
+#   ACTIONREF owner/repo of a GitHub Action whose tags were hijacked: flagged when a
+#            workflow uses it by tag/branch instead of a full commit SHA
+# Blank lines and # comments are ignored. Append freely; the script re-reads on every run.
+
+# Contagious Interview / WaterPlum host artefacts (BeaverTail, InvisibleFerret, OtterCookie)
+PATH	.task	OtterCookie staging dir (Jamf, 2026)
+PATH	.vscode/cache	Contagious Interview stage-1 drop dir (fake-interview repo lure, 2026)
+PATH	.n2	InvisibleFerret / BeaverTail drop dir
+PATH	.npl	InvisibleFerret python drop dir
+PATH	.pyp	InvisibleFerret python drop dir
+PATH	.n3	BeaverTail variant drop dir
+FILENAME	parser.js	OtterCookie stage script run via `npm install && node parser.js`
+
+# Contagious Interview npm lookalikes (Socket, 2026)
+NPMPKG	tailwind-magic	second-stage fetcher
+NPMPKG	tailwind-node	second-stage fetcher
+NPMPKG	node-tailwind	second-stage fetcher
+NPMPKG	node-tailwind-magic	second-stage fetcher
+NPMPKG	react-modal-select	second-stage fetcher
+
+# Shai-Hulud 2.0 / Sha1-Hulud (Datadog, Unit42, Endor, Phoenix)
+FILENAME	bun_environment.js	worm payload
+FILENAME	setup_bun.js	worm bootstrap
+PATH	.truffler-cache	TruffleHog dropped for credential harvesting
+WORKFLOW	SHA1HULUD	self-hosted runner label used for persistence
+WORKFLOW	shai-hulud	v1 workflow file name
+WORKFLOW	discussion.yaml	v2 rogue workflow name
+
+# ClickFix lure shapes in shell history (Infiniti, MacSync, ClickLock, AMOS)
+SHELLCMD	curl[^|;&]*\|[[:space:]]*(ba|z)?sh\b	curl-pipe-shell
+SHELLCMD	base64[[:space:]]+(-d|-D|--decode)[^|]*\|[[:space:]]*(ba|z)?sh\b	base64-pipe-shell
+SHELLCMD	echo[[:space:]]+[A-Za-z0-9+/=]{40,}[[:space:]]*\|[[:space:]]*base64	echoed-base64-blob
+SHELLCMD	osascript[[:space:]]+-e[^;]*https?://	osascript-with-url
+SHELLCMD	xattr[[:space:]]+-[a-z]*d[a-z]*[[:space:]]+com\.apple\.quarantine	quarantine-strip
+SHELLCMD	nohup[[:space:]]+(node|python3?|bash|sh)\b	nohup-interpreter
+
+# ---- added 2026-10-28 after the web sweep of Aug–Oct 2026 campaigns ----
+
+# Apex / REF8801 fake Web3 accelerator (Elastic, Oct 2026): npm stealers + CloudSyncD backdoor,
+# fake macOS password prompt, hijacks AI-agent/MCP configs
+NPMPKG	@apexacc/cli	Apex stealer
+NPMPKG	@apexacc/audit	Apex stealer
+NPMPKG	@apexfdn/apex	Apex stealer
+NPMPKG	@copilot-mcp/apex	Apex stealer posing as an MCP server
+NPMPKG	@apexfdn/copilot-mcp	Apex stealer posing as an MCP server
+FILENAME	CloudSyncD	Apex macOS backdoor binary
+FILENAME	com.apple.system.loader	Apex encrypted loader posing as Apple
+NPMPKG	agentenact	GitHub malware advisory 2026-10-27 (0.2.0)
+
+# axios compromise (Mar 2026): phantom dep with postinstall RAT dropper
+NPMPKG	plain-crypto-js	axios phantom dependency, postinstall setup.js
+NPMVER	axios	1.14.1
+NPMVER	axios	0.30.4
+ABSPATH	/Library/Caches/com.apple.act.mond	axios stage-2 RAT on macOS
+
+# Tensorlake / @subql trusted-publishing compromises (Oct 2026)
+NPMVER	tensorlake	0.5.144
+NPMVER	@subql/common	5.8.3
+WORKFLOW	ci-artifacts.dev	@subql release-swap artifact host
+
+# ChainDrop / Shai-Hulud "Here We Go Again" (Microsoft, Aug 2026) + TeamPCP loaders
+REPOPATH	.claude/setup.mjs	ChainDrop repo loader
+REPOPATH	.vscode/setup.mjs	ChainDrop repo loader
+FILENAME	Math_Symbol.js	ChainDrop NodeJS-dir artefact
+FILENAME	Math_init.js	ChainDrop NodeJS-dir artefact
+FILENAME	bw_setup.js	TeamPCP Bitwarden-CLI loader
+FILENAME	router_init.js	TeamPCP loader
+FILENAME	tanstack_runner.js	TeamPCP TanStack loader
+TMPGLOB	bun-dl-*	second-stage Bun download dir
+TMPGLOB	kitty-*	Nx Console Bun staging dir
+WORKFLOW	format-check.yml	TeamPCP injected secrets-dump workflow
+FILENAME	format-results.txt	TeamPCP secrets-dump output
+WORKFLOW	thebeautifulmarchoftime	ChainDrop GitHub fallback marker
+WORKFLOW	TheBeautifulSnadsOfTime	Hades commit-search marker
+WORKFLOW	firedalazer	Hades python dropper marker
+
+# TeamPCP / Nx Console / CanisterWorm / Trivy dropper host artefacts (May–Sep 2026)
+PATH	.local/share/kitty/cat.py	Nx Console payload backdoor
+PATH	.local/share/pgmon/service.py	CanisterWorm persistence
+PATH	.config/sysmon.py	Trivy-action dropper
+PATH	Library/LaunchAgents/com.user.kitty-monitor.plist	Nx Console macOS persistence
+ABSPATH	/var/tmp/.gh_update_state	backdoor anti-replay record
+FILENAME	gh-token-monitor	Mini Shai-Hulud wiper daemon (wipes $HOME when the stolen token is revoked)
+
+# GhostAction (Oct 2026): rogue workflows pushed with stolen tokens
+WORKFLOW	security-audit.yml	GhostAction
+WORKFLOW	github_actions_security.yml	GhostAction
+WORKFLOW	t.m-kosche	actions-cool exfil domain
+
+# GitHub Actions whose tags were repointed to imposter commits (Mar–Sep 2026): only a
+# full-SHA pin is safe
+ACTIONREF	actions-cool/issues-helper	tags hijacked 2026-05-18, reactivated 2026-09-16
+ACTIONREF	actions-cool/maintain-one-comment	same cluster
+ACTIONREF	codfish/semantic-release-action	Miasma stealer 2026-06-24
+ACTIONREF	aquasecurity/trivy-action	75 tags hijacked 2026-03-19
+
+# Hades / lightning / LiteLLM PyPI compromises (Apr–Oct 2026): Bun-based stealers run from
+# .pth startup hooks or import time
+PYVER	litellm	1.107.0
+PYVER	lightning	2.6.2
+PYVER	lightning	2.6.3
+PYPKG	bramin	Hades
+PYPKG	cmd2func	Hades
+PYPKG	coolbox	Hades
+PYPKG	executor-engine	Hades
+PYPKG	executor-http	Hades
+PYPKG	funcdesc	Hades
+PYPKG	magique	Hades
+PYPKG	magique-ai	Hades
+PYPKG	mrbios	Hades
+PYPKG	nucbox	Hades
+PYPKG	okite	Hades
+PYPKG	pantheon-agents	Hades
+PYPKG	pantheon-toolsets	Hades
+PYPKG	synago	Hades
+PYPKG	uprobe	Hades
+
+# Rustbot (crates.io, Aug 2026): build.rs drops /tmp/rust-setup Mach-O + LaunchAgent
+CRATE	proc-macro1	Rustbot loader (typosquat of proc-macro2)
+CRATE	proc-macro-en	Rustbot loader
+CRATE	aovine	Rustbot
+CRATE	arone	Rustbot
+CRATE	aronenao	Rustbot
+CRATE	tinymember	Rustbot
+CRATEVER	arrayref	0.3.10
+CRATEVER	internment	0.8.7
+CRATEVER	append-only-vec	0.1.9
+ABSPATH	/tmp/rust-setup	Rustbot stage-2 Mach-O
+ABSPATH	/private/tmp/rust-setup	Rustbot stage-2 Mach-O

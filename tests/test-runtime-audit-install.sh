@@ -88,6 +88,10 @@ expect_in "clean is still qualified" "no known pattern matched"
 # --status must read the interval back from the installed entry, not restate what was
 # typed at install time: an install at 1800s that someone later forgets should not look
 # identical to one at 3600s.
+# The fixture is a launchd plist, so this block runs on macOS only: on Linux the
+# installer reads a systemd timer or the real user's crontab, and a test must never
+# write either of those.
+if [[ "$(uname -s)" == Darwin ]]; then
 mkdir -p "$TMP/sandbox-home/Library/LaunchAgents"
 cat >"$TMP/sandbox-home/Library/LaunchAgents/com.agent-security.runtime-audit.plist" <<'PL'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -101,6 +105,9 @@ expect_in "reports 1800s" "every 1800s"
 expect_in "reports it in minutes too" "about 30 min"
 expect_in "armed" "ARMED           : yes"
 rm -f "$TMP/sandbox-home/Library/LaunchAgents/com.agent-security.runtime-audit.plist"
+else
+  echo "  --  interval read-back check skipped: launchd fixture, not Darwin"
+fi
 
 # --uninstall is safe to run when nothing is installed.
 run_install "uninstall with nothing installed" 0 --uninstall --dry-run

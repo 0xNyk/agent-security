@@ -36,6 +36,17 @@
 # Every one is a STRING INSIDE A HEREDOC written to a temp file and fed to the audit via
 # --ps-file. Nothing executes them; they exist so the detector has something to detect.
 #
+# The on-disk IOC sweep adds five, all in tests/test-ioc-sweep.sh: the "auth error"
+# config-dropper fixture (decode an env var, fetch, exec behind a fake auth error) and
+# the clean-side negatives (decode without a sink, a sink without a decode, and a
+# dropper placed inside node_modules to prove the sweep prunes package stores). Every
+# one is a printf STRING written into a throwaway fixture tree; nothing runs them.
+#   'const src = atob\(process'                → the config-dropper fixture (decode line)
+#   'eval\(proxyInfo\)'                        → the config-dropper fixture (sink line)
+#   'APP_CONFIG_B64'                            → clean negative: decode, no sink
+#   'devtools REPL helper'                      → clean negative: sink, no decode
+#   'var a=atob\(process'                       → pruned node_modules negative
+#
 # If any OTHER finding appears, this exits non-zero — the allow-list is intentionally tight.
 set -euo pipefail
 
@@ -56,4 +67,9 @@ exec bash "$ROOT/scripts/scan-repo.sh" --all --markers /dev/null \
   --allow 'node -e const\{spawn\}=' \
   --allow 'python3 -c import urllib\.request' \
   --allow 'node --experimental-vm-modules -e' \
-  --allow 'python3 -W ignore -c'
+  --allow 'python3 -W ignore -c' \
+  --allow 'const src = atob\(process' \
+  --allow 'eval\(proxyInfo\)' \
+  --allow 'APP_CONFIG_B64' \
+  --allow 'devtools REPL helper' \
+  --allow 'var a=atob\(process'

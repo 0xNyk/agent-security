@@ -3,6 +3,44 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **ioc** (`ioc-sweep.sh` + `ioc-indicators.txt`) — read-only on-disk sweep against
+  published indicators for the campaigns that targeted developer machines through
+  October 2026. `runtime` sees processes; this sees what is installed and dormant.
+  Families: Contagious Interview host artefacts and npm lookalikes; Shai-Hulud 2.0
+  loaders anywhere including package caches; GlassWorm invisible-Unicode in IDE
+  extensions; ClickFix lure shapes in recent shell history (pattern name and host only,
+  never the command); the "auth error" config dropper (environment-variable decode
+  feeding an exec sink in the same file); compromised npm releases by exact version
+  (axios 1.14.1 / 0.30.4, tensorlake 0.5.144, @subql/common 5.8.3) and malicious
+  packages (Apex / REF8801, agentenact, plain-crypto-js); ChainDrop / TeamPCP / Nx
+  Console / CanisterWorm / Trivy loader paths and tmp staging; GitHub Actions whose tags
+  were hijacked (actions-cool/*, codfish/semantic-release-action, aquasecurity/trivy-action)
+  whenever a workflow uses them by anything other than a full commit SHA, plus
+  GhostAction workflow names; PyPI (Hades, lightning 2.6.2 / 2.6.3, litellm 1.107.0, the
+  `*-setup.pth` startup hook); crates.io (Rustbot crates, hijacked arrayref / internment /
+  append-only-vec); and agent / IDE config injection — `folderOpen` tasks, `SessionStart`
+  / `UserPromptSubmit` hooks or fetch-and-exec shapes in repository `.claude` / `.cursor`
+  / `.codex` settings and MCP configs, and a hash baseline of the home agent configs
+  with `--accept-config` to re-record after a deliberate change. Three-state exit like
+  `runtime`: `0` clean, `1` findings, `2` BLIND. Indicator kinds are documented in the
+  file header so a new campaign is a one-line append.
+
+  Precision notes from development: permission allowlists that merely *name* `curl` or
+  `python3 -c` are not hooks, so the hooks check inspects only the `hooks` object;
+  `Math_*.js` is a real file in `regenerate-unicode-properties`, so the ChainDrop filename
+  rule is exempt inside package stores; and per-indicator `$HOME` walks were collapsed
+  into single walks, which cut a full run over a large workspace from well over an hour to
+  minutes. Each fix has a neighbouring clean fixture. Runs under macOS `/bin/bash` 3.2 on
+  an empty workspace (empty-array expansions are guarded; a crash would have exited `1`,
+  which reads exactly like a finding), covered by a fixture that runs the system bash.
+- **The scheduler test no longer assumes launchd.** Its interval read-back check planted
+  a LaunchAgent plist and expected `--status` to read it, which only holds on macOS; on
+  Linux the installer reads a systemd timer or the user's real crontab, which a test must
+  never write. The check now runs on Darwin only and says so, and the whole suite passes
+  on Ubuntu 24.04 as a non-root user.
+
 ## 0.2.0
 
 Adds the two surfaces the first release did not watch: what an agent fetches, and what

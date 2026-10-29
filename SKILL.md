@@ -6,7 +6,9 @@ description: >-
   before installing a cloned starter template or third-party skill/package, when
   an agent is about to read fetched content or fetch a URL, when an agent holds
   GitHub credentials that can delete/rename/transfer/archive repos, or when you
-  need to know whether something unexpected is already running on the host. Seven
+  need to know whether something unexpected is already running on the host, or
+  whether a compromised package, hijacked Action, or injected agent config is already
+  sitting on disk. Eight
   gates, each stating its own boundary: scan-repo (leak + same-file dropper gate
   before publish), vet-incoming (inbound supply-chain gate — scan only, never
   installs), scan-content (known-pattern tripwire for untrusted fetched content,
@@ -18,8 +20,11 @@ description: >-
   (read-only audit of what the active token and org policy can still destroy), and
   runtime-audit (read-only audit of running processes and autostart persistence —
   the already-running surface no gate watches, schedulable so it does not depend on
-  someone remembering). Verbs: scan, vet, scan-content, check-url,
-  research-egress-install, guard-install, guard-status, harden, runtime.
+  someone remembering), and ioc-sweep (read-only on-disk sweep against published
+  indicators for the 2026 developer-targeted campaigns: compromised npm / PyPI /
+  crates.io releases, worm loaders in package caches, hijacked GitHub Actions used by
+  tag, and agent / IDE config injection). Verbs: scan, vet, scan-content, check-url,
+  research-egress-install, guard-install, guard-status, harden, runtime, ioc.
   CLEAN means no known pattern matched; it does not mean safe. Defensive use only —
   not an attacker toolkit.
 metadata:
@@ -59,6 +64,8 @@ obfuscate, or deliver payloads. The dropper fixtures are inert documentation exa
   defense): `references/untrusted-content.md`; manipulation checklist: `references/social-engineering.md`.
 - **Safe external research** (pre-fetch egress — before you open a URL/PDF): `references/safe-research.md`.
 - **Host runtime** (what is already running, and why no gate sees it): the `runtime` verb below.
+- **On-disk indicators** (what is installed and dormant: compromised releases, loaders,
+  hijacked actions, injected agent configs): the `ioc` verb below.
 - Install/uninstall detail: `references/install.md`.
 
 ## When this triggers
@@ -78,6 +85,10 @@ obfuscate, or deliver payloads. The dropper fixtures are inert documentation exa
   an unexplained process, an unfamiliar autostart entry, or a periodic health check of
   the host itself (the `runtime` verb — the only one here that watches the machine
   rather than a gate).
+- **A supply-chain compromise was just published** and you want to know whether it
+  landed here: a package release pulled from npm / PyPI / crates.io, a GitHub Action
+  whose tags were repointed, a worm that writes loaders into package caches or
+  `.claude` / `.vscode` directories (the `ioc` verb — daily, read-only, indicator-driven).
 
 ## Verbs
 
@@ -269,6 +280,72 @@ then contain with `kill -STOP` before `kill -9` — a stopped process cannot fir
 detached respawn, so containment is atomic across every generation and the volatile
 state a `-9` destroys survives. Hunt persistence before eradicating.
 
+### `ioc` — sweep what is INSTALLED on disk
+
+`runtime` sees processes. It does not see a compromised package release sitting in a
+lockfile, a worm loader waiting in a package cache, a hijacked Action tag in a workflow,
+or a `SessionStart` hook an attacker committed into a repository's agent config. Those are
+on disk, dormant, and will run the next time someone installs, opens a folder, or starts
+an agent session. `scripts/ioc-sweep.sh` walks the disk against published indicators in
+`scripts/ioc-indicators.txt`. Read-only; it reports and fixes nothing.
+
+| Family | What it looks for |
+|---|---|
+| Contagious Interview (BeaverTail / InvisibleFerret / OtterCookie) | `~/.task`, `~/.n2`, `~/.npl`, `~/.pyp`, `~/.vscode/cache`, stray `parser.js`, the npm lookalikes in any lockfile |
+| Shai-Hulud 2.0 | `bun_environment.js` / `setup_bun.js` anywhere including node_modules and caches, preinstall hooks naming them, `~/.truffler-cache`, `SHA1HULUD` / `discussion.yaml` workflows |
+| GlassWorm | Variation Selectors Supplement bytes in Cursor / VS Code extensions and workspace source |
+| ClickFix stealers | lure shapes in recent shell history (prints the pattern name and host only, never the command), Apple-named executables outside bundles, fresh executables in tmp |
+| "Auth error" config dropper | same-file decode of an environment variable feeding `eval(` / `new Function(` / `vm.*` in any `.js/.ts/.vue/.svelte` of a working tree or package cache, node_modules pruned. The same shape as the starter-template dropper `vet` was written for, reported in 2026 inside a Capacitor config file |
+| Compromised npm releases (axios 1.14.1 / 0.30.4, tensorlake 0.5.144, @subql/common 5.8.3) and malicious packages (Apex / REF8801 set, agentenact, plain-crypto-js) | `NPMVER` / `NPMPKG` in lockfiles, `package.json`, installed node_modules manifests, bun / npx / pnpm cache directory names |
+| ChainDrop / TeamPCP / Nx Console / CanisterWorm / Trivy loaders | `.claude/setup.mjs`, `.vscode/setup.mjs`, pre/postinstall running `setup.mjs` / `bw_setup` / `router_init` / `tanstack_runner`, `Math_Symbol.js`, `bun-dl-*` / `kitty-*` tmp staging, `~/.local/share/kitty/cat.py`, `~/.config/sysmon.py`, `com.user.kitty-monitor.plist`, `/var/tmp/.gh_update_state`, `gh-token-monitor` |
+| Hijacked GitHub Actions (actions-cool/*, codfish/semantic-release-action, aquasecurity/trivy-action) and GhostAction workflows | `ACTIONREF`: any `uses:` of those actions that is not a 40-hex SHA pin; `security-audit.yml`, `github_actions_security.yml`, `format-check.yml`, the ChainDrop / Hades commit-search markers |
+| PyPI: the Hades package set, lightning 2.6.2 / 2.6.3, litellm 1.107.0 | uv / poetry / requirements / pyproject locks, every `*.dist-info` under `$HOME`, and the Hades startup shape `*-setup.pth` / `_index.js` inside any site-packages |
+| crates.io: Rustbot (proc-macro1, proc-macro-en, aovine, …) and hijacked arrayref 0.3.10 / internment 0.8.7 / append-only-vec 0.1.9 | `Cargo.lock` name + version pairs and `~/.cargo/registry` src / cache directories; `/tmp/rust-setup` |
+| Agent / IDE config injection | repository `.vscode/tasks.json` with `folderOpen`; repository `.claude` / `.cursor` / `.codex` settings whose `hooks` object has `SessionStart` / `UserPromptSubmit` entries or fetch-and-exec shapes; repository MCP configs with fetch-and-exec shapes; and a hash baseline of the home agent configs (`~/.claude/settings.json`, the MCP maps of `~/.claude.json`, `~/.cursor/mcp.json`, `~/.hermes/config.yaml`, `~/.vscode/tasks.json`) |
+
+```sh
+scripts/ioc-sweep.sh                   # exit 0 clean, 1 findings, 2 BLIND
+scripts/ioc-sweep.sh --days 30         # widen the shell-history window
+scripts/ioc-sweep.sh --accept-config   # re-record the home agent-config baseline after a deliberate change
+scripts/ioc-sweep.sh --dev ~/src       # workspace root other than ~/dev
+scripts/ioc-sweep.sh --no-notify       # for cron; skips the macOS notification
+```
+
+Finding tags: `DROP-PATH`, `PAYLOAD-FILE`, `REPO-PATH`, `TMP-STAGING`, `TMP-MACHO`,
+`LOOKALIKE-PKG`, `COMPROMISED-NPM-RELEASE`, `PREINSTALL-HOOK`, `ROGUE-WORKFLOW`,
+`ACTIONS-RUNNER`, `HIJACKED-ACTION-BY-TAG`, `MALICIOUS-PYPKG`, `COMPROMISED-PYPI-RELEASE`,
+`PYTHON-STARTUP-HOOK`, `MALICIOUS-CRATE`, `HIJACKED-CRATE-RELEASE`, `ENV-DECODE-DROPPER`,
+`AUTORUN-TASK`, `REPO-AGENT-HOOK`, `SUSPICIOUS-MCP-CONFIG`, `AGENT-CONFIG-NEW`,
+`AGENT-CONFIG-DRIFT`, `SHELL-LURE`, `APPLE-NAMED-EXEC`, `INVISIBLE-UNICODE-EXT`,
+`INVISIBLE-UNICODE-SRC`.
+
+Findings: `~/.local/state/agent-security/ioc-sweep-findings.txt`; log: `ioc-sweep.log`.
+The first run records the agent-config baseline silently; every later run reports
+`AGENT-CONFIG-NEW` / `AGENT-CONFIG-DRIFT` until you accept the change. Add an indicator by
+appending one `KIND<TAB>VALUE<TAB>note` line; the kinds are documented at the top of
+the file.
+
+Schedule it the same way as `runtime` (daily is enough; the disk changes slowly):
+`references/install.md` has the launchd and cron lines.
+
+Limits, plainly:
+
+- **Names, paths, versions and shapes.** A renamed payload, a compromise published after
+  the indicator list was last updated, or a loader split across two files walks past.
+  The list is a snapshot of public reporting through late October 2026.
+- **Hijacked-action detection is by reference, not content.** Only a full-SHA pin
+  protects you from the next tag repoint; the sweep tells you which workflows are
+  exposed, it cannot tell you whether the tag has already moved.
+- **The config baseline blesses whatever is there on first run.** Read the home agent
+  configs yourself once before trusting the diff.
+- **History lures.** A command pasted into a terminal whose history is off leaves nothing
+  to read.
+- **Bounded walks.** Workspace walks stop between four and nine levels deep depending on
+  the check, so a very deep monorepo is partly unseen. The tmp check reports Mach-O
+  files only; a shell script or ELF binary dropped in tmp is not a finding.
+- **Workflow tokens match content, not filenames.** A workflow that merely mentions
+  `security-audit.yml` in a comment fires `ROGUE-WORKFLOW`. Read the line before acting.
+
 ### `guard-install` — repository-lifecycle guard
 
 Blocks `gh repo delete|rename|transfer|archive` and privatize, plus the equivalent
@@ -332,6 +409,7 @@ bash tests/test-check-url.sh     # safe-research URL classifier (ALLOW/REVIEW/BL
 bash tests/test-research-egress-hook.sh  # PreToolUse fetch gate fixtures
 bash tests/test-runtime-audit.sh # runtime audit fixtures (captured ps tables, drift, BLIND failure mode)
 bash tests/test-runtime-audit-install.sh # scheduler install/status/uninstall (dry-run, throwaway HOME)
+bash tests/test-ioc-sweep.sh     # on-disk IOC sweep (infected vs clean fixture trees, config drift, BLIND)
 bash tests/test-guard.sh         # guard fixtures — offline, fake gh, no real GitHub call
 bash tests/self-scan.sh          # this repo is clean under its own leak/dropper scanner
 ```

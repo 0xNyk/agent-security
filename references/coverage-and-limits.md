@@ -291,6 +291,66 @@ eradicate.
 
 ---
 
+## `ioc-sweep.sh` — the on-disk indicator sweep
+
+`runtime-audit.sh` watches what is running. This watches what is installed and dormant,
+which is where most 2026 supply-chain compromises sit between delivery and execution: a
+compromised release in a lockfile, a worm loader in a package cache, a hijacked Action
+reference in a workflow, a `SessionStart` hook committed into a repository's agent
+config. None of those is a process until someone installs, opens the folder, or starts a
+session.
+
+### What it flags
+
+| Finding | Shape |
+|---|---|
+| `DROP-PATH` / `PAYLOAD-FILE` / `REPO-PATH` / `TMP-STAGING` | a known drop directory under `$HOME`, an exact payload basename anywhere under the scanned roots (package caches included), a known path inside a working tree, a known staging name directly under a tmp directory |
+| `LOOKALIKE-PKG` / `COMPROMISED-NPM-RELEASE` | a named package in any lockfile or `package.json`; an exact compromised version in a lockfile, an installed node_modules manifest, or a bun / npx / pnpm cache directory name |
+| `PREINSTALL-HOOK` | a pre/postinstall whose command names a known worm loader |
+| `MALICIOUS-PYPKG` / `COMPROMISED-PYPI-RELEASE` / `PYTHON-STARTUP-HOOK` | PEP 503-normalised name match in uv / poetry / requirements / pyproject locks and every `*.dist-info` under `$HOME`; the `*-setup.pth` + `_index.js` startup shape in any site-packages |
+| `MALICIOUS-CRATE` / `HIJACKED-CRATE-RELEASE` | `Cargo.lock` name + version pairs and `~/.cargo/registry` directories |
+| `ROGUE-WORKFLOW` / `ACTIONS-RUNNER` / `HIJACKED-ACTION-BY-TAG` | a known marker token anywhere in a workflow's content (so a comment that names one fires too); a self-hosted runner install in a workflow; a `uses:` of a hijacked action that is not a 40-hex SHA pin |
+| `ENV-DECODE-DROPPER` | a base64 decode of an environment variable and an exec sink in the same source or config file, node_modules pruned, files over 2 MB skipped |
+| `AUTORUN-TASK` / `REPO-AGENT-HOOK` / `SUSPICIOUS-MCP-CONFIG` | repository `.vscode/tasks.json` with `folderOpen`; the `hooks` object of repository `.claude` / `.cursor` / `.codex` settings with session-start hooks or fetch-and-exec shapes; repository MCP configs with fetch-and-exec shapes |
+| `AGENT-CONFIG-NEW` / `AGENT-CONFIG-DRIFT` | a home agent config appeared or changed since the recorded hash baseline (for `~/.claude.json` only the MCP server maps are hashed, so ordinary UI state does not fire) |
+| `SHELL-LURE` / `APPLE-NAMED-EXEC` / `TMP-MACHO` / `INVISIBLE-UNICODE-EXT` / `INVISIBLE-UNICODE-SRC` | ClickFix lure shapes in recent history (pattern name and host only), executables named `com.apple.*` outside bundles, Mach-O files written to tmp within the window (Mach-O only: scripts and ELF binaries are not flagged), Variation Selectors Supplement bytes in IDE extensions and workspace source |
+
+### What it does NOT catch — the honest boundaries
+
+- **It is a list.** Every check is a name, path, version, or shape taken from public
+  reporting. A renamed payload, a new package name, a version published after the list
+  was last updated, or a loader split across two files walks past. The list is a
+  snapshot; append to it.
+- **Hijacked actions are detected by reference.** The sweep cannot tell whether a tag has
+  already been repointed; it tells you which workflows would follow it if it were. Only a
+  full-SHA pin closes that.
+- **The config baseline blesses the first run.** If an injected hook is already in a home
+  agent config when the baseline is recorded, it is normal from then on. Read those files
+  once yourself.
+- **Shell history is optional.** A lure pasted into a terminal with history off leaves
+  nothing to read, and the check never prints the command itself.
+- **Package stores are pruned for the dropper shape.** A dropper inside node_modules is
+  caught by name and version rules, not by the decode-then-exec rule; walking every
+  minified bundle for that shape produced only false positives (bundlers that decode an
+  embedded archive next to an environment check).
+- **Bounded walks.** Workspace walks stop between four and nine levels deep depending on
+  the check; a very deep monorepo is partly unseen.
+- **Broken JSON is treated as empty.** A repository agent config that does not parse is
+  reported as having no hooks, and a home config that does not parse hashes to a constant.
+  The parser is `python3`; on a machine without it the agent-config checks silently pass.
+- **Not an AV.** No hashes of binaries, no signing checks, no network reputation. A
+  CLEAN result means no listed indicator matched.
+
+### Precision, again
+
+During development the sweep reported eight findings on a clean workspace, all false:
+permission allowlists that merely *named* `curl` and `python3 -c`, and a real
+`Math_Symbol.js` shipped by a Unicode data package. A daily sweep that cries wolf is a daily sweep that
+gets switched off, so the hooks check now reads only the `hooks` object, the filename
+rule is exempt inside package stores, and both cases have clean fixtures.
+
+---
+
 ## repo-guard — the repository-lifecycle guard
 
 ### What it blocks (repo-LEVEL destruction only), on a two-tier model
