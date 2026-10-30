@@ -48,8 +48,8 @@ not a version bump. Run every step from the repo root before publishing.
 # create the repo (operator action), set origin, then:
 bash tests/run-all.sh                   # every suite + self-scan; must be ALL TESTS PASSED
 git push -u origin main
-git tag -s v0.2.0 -m "agent-security 0.2.0"
-git push origin v0.2.0
+git tag -s v0.3.0 -m "agent-security 0.3.0"
+git push origin v0.3.0
 ```
 
 Never publish a build where the self-scan is not CLEAN or any suite is red.
