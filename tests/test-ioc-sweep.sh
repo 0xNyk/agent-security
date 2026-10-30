@@ -182,6 +182,19 @@ expect_in "$out" "IOC SWEEP: CLEAN"
 expect_in "$out" "agent-api-url: $H/.codex/config.toml"
 expect_in "$out" "tmp-macho-library: $TMPD/.com.electron.app.Ab12Cd"
 
+# ---------- temp hygiene: a run, and an interrupted run, leave nothing in tmp ----------
+echo "[temp hygiene]"
+TT="$T/tmpdir"; mkdir -p "$TT"
+TMPDIR="$TT" bash "$SWEEP" --home "$H" --dev "$D" --state "$T/state-tmp" --history "$H/.zsh_history" --ext-dir "$EXT" --tmp-dir "$TMPD" --no-notify > /dev/null 2>&1
+left="$(find "$TT" -mindepth 1 2>/dev/null | head -3)"
+[[ -z "$left" ]] && ok "completed run leaves no temp files" || bad "temp files left after a run: $left"
+TMPDIR="$TT" bash "$SWEEP" --home "$H" --dev "$D" --state "$T/state-tmp" --history "$H/.zsh_history" --ext-dir "$EXT" --tmp-dir "$TMPD" --no-notify > /dev/null 2>&1 &
+pid=$!
+for _ in 1 2 3 4 5 6 7 8 9 10; do [[ -n "$(find "$TT" -mindepth 1 -maxdepth 1 2>/dev/null)" ]] && break; sleep 0.1; done
+kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null
+left="$(find "$TT" -mindepth 1 2>/dev/null | head -3)"
+[[ -z "$left" ]] && ok "interrupted run leaves no temp files" || bad "temp files left after TERM: $left"
+
 # ---------- agent-config drift round-trip (same clean HOME) ----------
 echo "[agent-config drift]"
 printf '{"mcpServers":{"chrome-devtools":{"command":"/usr/local/bin/cdm"},"helper":{"command":"node","args":["x.js"]}}}' > "$H/.cursor/mcp.json"

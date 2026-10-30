@@ -67,8 +67,13 @@ mkdir -p "$STATE" 2>/dev/null || { echo "BLIND: cannot create $STATE" >&2; exit 
 OUT="$STATE/ioc-sweep-findings.txt"
 LOG="$STATE/ioc-sweep.log"
 : > "$OUT" || { echo "BLIND: cannot write $OUT" >&2; exit 2; }
+# Every temporary list lives in one private directory that a trap removes on any exit,
+# including Ctrl-C and kill, so an interrupted sweep leaves nothing behind in tmp.
+WORK="$(mktemp -d "${TMPDIR:-/tmp}/ioc-sweep.XXXXXX")" || { echo "BLIND: cannot create a work directory" >&2; exit 2; }
+trap 'rm -rf "$WORK"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
-# Background QoS: efficiency cores, throttled IO (macOS taskpolicy, else renice).
 # Plain nice, not background QoS: taskpolicy -b throttles IO and pins to efficiency cores,
 # which made a 10-minute sweep take 40. A shorter run at low CPU priority disturbs the
 # machine less than a long one at throttled IO.
@@ -161,7 +166,7 @@ fi
 # [4] npm lookalike packages in lockfiles. One walk collects every npm manifest and
 #     lockfile in the workspace; [4] and every [4b] version check read that list instead
 #     of walking once per indicator.
-LOCK_LIST="$(mktemp "${TMPDIR:-/tmp}/ioc-locks.XXXXXX")"
+LOCK_LIST="$(mktemp "$WORK/ioc-locks.XXXXXX")"
 [[ -d "$DEV_DIR" ]] && find "$DEV_DIR" -maxdepth 5 -type d \( "${PRUNE[@]}" \) -prune -o -type f \
      \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock -o -name bun.lock -o -name bun.lockb -o -name package.json \) -print 2>/dev/null > "$LOCK_LIST"
 if (( ${#IOC_PKGS[@]} )) && [[ -s "$LOCK_LIST" ]]; then
@@ -174,7 +179,7 @@ fi
 # [4b] Specific compromised npm releases: lockfiles + manifests, installed node_modules
 #      manifests, and the bun/npx caches (dir names carry name@version).
 if (( ${#IOC_NPMVER[@]} )); then
-  NM_MANIFESTS="$(mktemp "${TMPDIR:-/tmp}/ioc-nm.XXXXXX")"
+  NM_MANIFESTS="$(mktemp "$WORK/ioc-nm.XXXXXX")"
   if [[ -d "$DEV_DIR" ]]; then
     NM_EXPR=(); for nv in ${IOC_NPMVER[@]+"${IOC_NPMVER[@]}"}; do NM_EXPR+=( -o -path "*/node_modules/${nv%%	*}/package.json" ); done
     find "$DEV_DIR" -maxdepth 9 -type f \( "${NM_EXPR[@]:1}" \) 2>/dev/null > "$NM_MANIFESTS"
@@ -203,7 +208,7 @@ rm -f "$LOCK_LIST"
 
 # [5] Rogue GitHub Actions workflows and self-hosted runner installs. One walk of the
 #     workspace collects every workflow file; [5], [5b] and [5c] read that list.
-WF_LIST="$(mktemp "${TMPDIR:-/tmp}/ioc-wf.XXXXXX")"
+WF_LIST="$(mktemp "$WORK/ioc-wf.XXXXXX")"
 [[ -d "$DEV_DIR" ]] && find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o -path '*/.github/workflows/*' -type f -print 2>/dev/null > "$WF_LIST"
 if (( ${#IOC_WORKFLOW[@]} )) && [[ -s "$WF_LIST" ]]; then
   # A token that is a workflow FILENAME only matches the basename: a workflow that merely
@@ -238,7 +243,7 @@ fi
 #      the sweep reports the exposure. A note by default (count + file list in
 #      ioc-sweep-notes.txt), a finding per use with --strict-actions.
 if [[ -s "$WF_LIST" ]]; then
-  UNPINNED="$(mktemp "${TMPDIR:-/tmp}/ioc-unpin.XXXXXX")"
+  UNPINNED="$(mktemp "$WORK/ioc-unpin.XXXXXX")"
   grep -v '/tests/fixtures/' "$WF_LIST" |
     while read -r f; do
       grep -oE "uses:[[:space:]]*['\"]?[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+@[^[:space:]'\"#]+" "$f" 2>/dev/null |
@@ -369,7 +374,7 @@ PY_LOCKS=()
        \( -name uv.lock -o -name poetry.lock -o -name 'requirements*.txt' -o -name Pipfile.lock -o -name pyproject.toml \) -print 2>/dev/null)
 # one walk of $HOME for every site-packages artefact we care about (dist-info dirs,
 # .pth startup hooks, Hades _index.js); per-indicator greps run against this list
-PY_INSTALLED="$(mktemp "${TMPDIR:-/tmp}/ioc-py.XXXXXX")"
+PY_INSTALLED="$(mktemp "$WORK/ioc-py.XXXXXX")"
 find "$HOME_DIR" -maxdepth 10 \( -name Library -o -name node_modules -o -name .git -o -name .Trash \) -prune -o \
      \( -type d -name '*.dist-info' -o -type f -name '*-setup.pth' -o -type f -name '_index.js' \) -print 2>/dev/null |
   grep -v '/tests/fixtures/' > "$PY_INSTALLED"
@@ -444,7 +449,7 @@ out={"mcpServers":d.get("mcpServers",{}),"projects":{k:v.get("mcpServers") for k
 print(json.dumps(out,sort_keys=True))' "$1" 2>/dev/null
 }
 # The env map of a JSON agent config (Claude settings): where a base-URL redirect lands.
-API_KEYS="$(mktemp "${TMPDIR:-/tmp}/ioc-apikeys.XXXXXX")"
+API_KEYS="$(mktemp "$WORK/ioc-apikeys.XXXXXX")"
 env_object() {
   (( HAVE_PY )) || { cat "$1" 2>/dev/null; return 0; }
   python3 -I -c 'import json,sys
@@ -476,7 +481,7 @@ api_redirect() {
   fi
 }
 if [[ -d "$DEV_DIR" ]]; then
-  CFG_LIST="$(mktemp "${TMPDIR:-/tmp}/ioc-cfg-list.XXXXXX")"
+  CFG_LIST="$(mktemp "$WORK/ioc-cfg-list.XXXXXX")"
   find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o -type f \
        \( -path '*/.vscode/tasks.json' -o -path '*/.claude/settings.json' -o -path '*/.claude/settings.local.json' \
           -o -path '*/.cursor/settings.json' -o -path '*/.codex/hooks.json' -o -name '.mcp.json' \
@@ -531,7 +536,7 @@ cfg_digest() {   # ~/.claude.json churns constantly; only its MCP server maps ma
     shasum -a 256 "$f" 2>/dev/null | cut -c1-16
   fi
 }
-NEWBASE="$(mktemp "${TMPDIR:-/tmp}/ioc-cfg.XXXXXX")"
+NEWBASE="$(mktemp "$WORK/ioc-cfg.XXXXXX")"
 for f in ${AGENT_CFG[@]+"${AGENT_CFG[@]}"}; do [[ -f "$f" ]] && printf '%s\t%s\n' "$f" "$(cfg_digest "$f")" >> "$NEWBASE"; done
 if [[ ! -s "$BASELINE" || "$ACCEPT_CONFIG" == 1 ]]; then
   cp "$NEWBASE" "$BASELINE" 2>/dev/null && echo "$(date -u +%FT%TZ) agent-config baseline recorded" >> "$LOG"

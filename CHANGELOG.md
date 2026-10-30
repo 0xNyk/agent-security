@@ -26,6 +26,9 @@ All notable changes to this project are documented here. This project adheres to
   native addon) is the `tmp-macho-library` note rather than `TMP-MACHO`, which now requires
   an executable or fat header; and Codex `[projects."<path>"]` trust tables are dropped
   before the fetch-and-exec grep, so a trusted scratch project under `/tmp` does not fire.
+  Every temporary list now lives in one private work directory that a trap removes on
+  exit, Ctrl-C or kill, so an interrupted sweep no longer leaves files in tmp; a fixture
+  sends `TERM` mid-run and checks.
 - **ioc** (`ioc-sweep.sh` + `ioc-indicators.txt`) — read-only on-disk sweep against
   published indicators for the campaigns that targeted developer machines through
   October 2026. `runtime` sees processes; this sees what is installed and dormant.

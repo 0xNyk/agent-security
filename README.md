@@ -160,7 +160,7 @@ Detector changes need a positive fixture, a neighboring clean fixture, and a wri
 
 ## Status and license
 
-Experimental, maintained as capacity permits, and released under the [MIT License](LICENSE). The current release line is `0.2.x`. Release checks live in [RELEASE.md](RELEASE.md); engineering decisions and visual provenance live in the [field notes](docs/field-notes.md) and [brand guide](docs/brand.md).
+Experimental, maintained as capacity permits, and released under the [MIT License](LICENSE). The current release line is `0.3.x`. Release checks live in [RELEASE.md](RELEASE.md); engineering decisions and visual provenance live in the [field notes](docs/field-notes.md) and [brand guide](docs/brand.md).
 
 ---
 
