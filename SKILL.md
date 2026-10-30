@@ -329,7 +329,8 @@ Finding tags: `DROP-PATH`, `PAYLOAD-FILE`, `REPO-PATH`, `TMP-STAGING`, `TMP-MACH
 Notes are not findings. Things worth knowing that are not evidence of compromise go to
 `ioc-sweep-notes.txt` and are printed under `NOTES`: every third-party Action used by
 tag or branch (with the file list, so you can pin them), executable scripts in tmp
-that carry no stager shape, and a home agent config that points its API at a named https
+that carry no stager shape, Mach-O bundles or dylibs in tmp (Electron native addons; they
+cannot run without a host process), and a home agent config that points its API at a named https
 host (`agent-api-url`), which is either your proxy or the one thing to read today.
 
 Findings: `~/.local/state/agent-security/ioc-sweep-findings.txt`; log: `ioc-sweep.log`.

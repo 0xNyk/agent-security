@@ -21,7 +21,11 @@ All notable changes to this project are documented here. This project adheres to
   baseline, so the first run after upgrading reports it as `AGENT-CONFIG-NEW` once. The npm
   lockfile walk now happens once and is shared by the lookalike and compromised-release
   checks instead of once per version indicator. Ten new fixture assertions, positive and
-  negative, including that neither the token nor the URL is ever printed.
+  negative, including that neither the token nor the URL is ever printed. Two precision
+  fixes from the first live run: a Mach-O bundle or dylib in tmp (an Electron app's unpacked
+  native addon) is the `tmp-macho-library` note rather than `TMP-MACHO`, which now requires
+  an executable or fat header; and Codex `[projects."<path>"]` trust tables are dropped
+  before the fetch-and-exec grep, so a trusted scratch project under `/tmp` does not fire.
 - **ioc** (`ioc-sweep.sh` + `ioc-indicators.txt`) — read-only on-disk sweep against
   published indicators for the campaigns that targeted developer machines through
   October 2026. `runtime` sees processes; this sees what is installed and dormant.
