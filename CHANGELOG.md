@@ -3,8 +3,25 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.3.0 — 2026-10-30
 
+- **ioc: the three campaigns published since the list was last updated, and two checks for
+  the mechanisms behind them.** Indicators for the fake job-interview Tailwind / Animate.css
+  plugin set (29 packages plus the two private scoped payloads they require), MALFEX
+  (`function-flag`, `function-color`, the Overlord and stealer loaders), the Downloads-folder
+  `AGENTS.md` / `CLAUDE.md` lure that talks a coding agent into installing them, and the
+  developer-tooling malware advisories of 27–30 October (`@atlisp/mcp`, `@zaip-ai/cli`,
+  `dsh-*`, `itsa-*`, camelotlabs, `numprint`, `trajmetrics`, `log-utils-sdk`). Two new
+  shapes: `AGENT-API-REDIRECT`, an API base-URL key in a repository `.claude` settings `env`
+  or `.codex/config.toml` (at home a finding only for plain-http or IP targets, otherwise the
+  `agent-api-url` note), because a redirected endpoint receives the session token and can
+  answer with tool calls; and `NPMRC-TOKEN`, a working-tree `.npmrc` whose `_authToken` is a
+  literal, which is what the Tailwind lure needs to resolve its private payload. Both print
+  the path, never the value. `~/.codex/config.toml` joins the home shape checks and the hash
+  baseline, so the first run after upgrading reports it as `AGENT-CONFIG-NEW` once. The npm
+  lockfile walk now happens once and is shared by the lookalike and compromised-release
+  checks instead of once per version indicator. Ten new fixture assertions, positive and
+  negative, including that neither the token nor the URL is ever printed.
 - **ioc** (`ioc-sweep.sh` + `ioc-indicators.txt`) — read-only on-disk sweep against
   published indicators for the campaigns that targeted developer machines through
   October 2026. `runtime` sees processes; this sees what is installed and dormant.

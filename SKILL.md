@@ -28,7 +28,7 @@ description: >-
   CLEAN means no known pattern matched; it does not mean safe. Defensive use only —
   not an attacker toolkit.
 metadata:
-  version: "0.2.0"
+  version: "0.3.0"
 ---
 
 # agent-security
@@ -297,11 +297,12 @@ an agent session. `scripts/ioc-sweep.sh` walks the disk against published indica
 | ClickFix stealers | lure shapes in recent shell history (prints the pattern name and host only, never the command), Apple-named executables outside bundles, fresh executables in tmp |
 | "Auth error" config dropper | same-file decode of an environment variable feeding `eval(` / `new Function(` / `vm.*` in any `.js/.ts/.vue/.svelte` of a working tree or package cache, node_modules pruned. The same shape as the starter-template dropper `vet` was written for, reported in 2026 inside a Capacitor config file |
 | Compromised npm releases (axios 1.14.1 / 0.30.4, tensorlake 0.5.144, @subql/common 5.8.3) and malicious packages (Apex / REF8801 set, agentenact, plain-crypto-js) | `NPMVER` / `NPMPKG` in lockfiles, `package.json`, installed node_modules manifests, bun / npx / pnpm cache directory names |
+| Fake job-interview Tailwind / Animate.css plugins (29 names plus the two private scoped payloads they require), MALFEX (`function-flag`, `function-color`, six loaders), the Downloads-folder `AGENTS.md` / `CLAUDE.md` agent lure, and the developer-tooling malware advisories of 27–30 October (`@atlisp/mcp`, `@zaip-ai/cli`, `dsh-*`, `itsa-*`, camelotlabs, `numprint`, `trajmetrics`, `log-utils-sdk`) | `NPMPKG` / `NPMVER` / `PYVER` as above; `PATH` for `~/Downloads/AGENTS.md` and `~/Downloads/CLAUDE.md`; a committed `.npmrc` with a literal registry token (`NPMRC-TOKEN`, path only) |
 | ChainDrop / TeamPCP / Nx Console / CanisterWorm / Trivy loaders | `.claude/setup.mjs`, `.vscode/setup.mjs`, pre/postinstall running `setup.mjs` / `bw_setup` / `router_init` / `tanstack_runner`, `Math_Symbol.js`, `bun-dl-*` / `kitty-*` tmp staging, `~/.local/share/kitty/cat.py`, `~/.config/sysmon.py`, `com.user.kitty-monitor.plist`, `/var/tmp/.gh_update_state`, `gh-token-monitor` |
 | Hijacked GitHub Actions (actions-cool/*, codfish/semantic-release-action, aquasecurity/trivy-action) and GhostAction workflows | `ACTIONREF`: any `uses:` of those actions that is not a 40-hex SHA pin; `security-audit.yml`, `github_actions_security.yml`, `format-check.yml`, the ChainDrop / Hades commit-search markers |
 | PyPI: the Hades package set, lightning 2.6.2 / 2.6.3, litellm 1.107.0 | uv / poetry / requirements / pyproject locks, every `*.dist-info` under `$HOME`, and the Hades startup shape `*-setup.pth` / `_index.js` inside any site-packages |
 | crates.io: Rustbot (proc-macro1, proc-macro-en, aovine, …) and hijacked arrayref 0.3.10 / internment 0.8.7 / append-only-vec 0.1.9 | `Cargo.lock` name + version pairs and `~/.cargo/registry` src / cache directories; `/tmp/rust-setup` |
-| Agent / IDE config injection | repository `.vscode/tasks.json` with `folderOpen`; repository `.claude` / `.cursor` / `.codex` settings whose `hooks` object has `SessionStart` / `UserPromptSubmit` entries or fetch-and-exec shapes; repository MCP configs with fetch-and-exec shapes; and a hash baseline of the home agent configs (`~/.claude/settings.json`, the MCP maps of `~/.claude.json`, `~/.cursor/mcp.json`, `~/.hermes/config.yaml`, `~/.vscode/tasks.json`) |
+| Agent / IDE config injection | repository `.vscode/tasks.json` with `folderOpen`; repository `.claude` / `.cursor` / `.codex` settings whose `hooks` object has `SessionStart` / `UserPromptSubmit` entries or fetch-and-exec shapes; repository MCP configs with fetch-and-exec shapes; and a hash baseline of the home agent configs (`~/.claude/settings.json`, the MCP maps of `~/.claude.json`, `~/.cursor/mcp.json`, `~/.hermes/config.yaml`, `~/.vscode/tasks.json`, `~/.codex/config.toml`). An API base-URL redirect (`ANTHROPIC_BASE_URL`, `chatgpt_base_url`, `base_url`) in a repository `.claude` settings `env` or `.codex/config.toml` is `AGENT-API-REDIRECT`; at home it is a finding for a plain-http or IP target and a note otherwise, because a deliberate proxy lives there |
 
 ```sh
 scripts/ioc-sweep.sh                   # exit 0 clean, 1 findings, 2 BLIND
@@ -320,14 +321,16 @@ Finding tags: `DROP-PATH`, `PAYLOAD-FILE`, `REPO-PATH`, `TMP-STAGING`, `TMP-MACH
 `PYTHON-STARTUP-HOOK`, `MALICIOUS-CRATE`, `HIJACKED-CRATE-RELEASE`, `ENV-DECODE-DROPPER`,
 `AUTORUN-TASK`, `REPO-AGENT-HOOK`, `SUSPICIOUS-MCP-CONFIG`, `AGENT-CONFIG-NEW`,
 `AGENT-CONFIG-DRIFT`, `AGENT-CONFIG-UNPARSEABLE`, `AGENT-CONFIG-UNCHECKED`,
-`HOME-AGENT-HOOK`, `HOME-MCP-CONFIG`, `UNPINNED-ACTION` (strict mode), `TMP-ELF`,
+`HOME-AGENT-HOOK`, `HOME-MCP-CONFIG`, `AGENT-API-REDIRECT`, `NPMRC-TOKEN`,
+`UNPINNED-ACTION` (strict mode), `TMP-ELF`,
 `TMP-SCRIPT`, `SHELL-LURE`, `APPLE-NAMED-EXEC`, `INVISIBLE-UNICODE-EXT`,
 `INVISIBLE-UNICODE-SRC`.
 
 Notes are not findings. Things worth knowing that are not evidence of compromise go to
 `ioc-sweep-notes.txt` and are printed under `NOTES`: every third-party Action used by
-tag or branch (with the file list, so you can pin them), and executable scripts in tmp
-that carry no stager shape.
+tag or branch (with the file list, so you can pin them), executable scripts in tmp
+that carry no stager shape, and a home agent config that points its API at a named https
+host (`agent-api-url`), which is either your proxy or the one thing to read today.
 
 Findings: `~/.local/state/agent-security/ioc-sweep-findings.txt`; log: `ioc-sweep.log`.
 The first run records the agent-config baseline silently; every later run reports
@@ -342,7 +345,7 @@ Limits, plainly:
 
 - **Names, paths, versions and shapes.** A renamed payload, a compromise published after
   the indicator list was last updated, or a loader split across two files walks past.
-  The list is a snapshot of public reporting through late October 2026.
+  The list is a snapshot of public reporting through 30 October 2026.
 - **Hijacked-action detection is by reference, not content.** The sweep cannot tell
   whether a tag has already moved. What it can do is show every Action you use by tag
   or branch (a note by default, findings with `--strict-actions`) so you can pin them to

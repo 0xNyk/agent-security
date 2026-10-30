@@ -167,7 +167,10 @@ and execution the compromise is a file on disk that nothing here was reading.
 by exact version across npm, PyPI and crates.io; malicious package names; loader paths,
 basenames and tmp staging names; hijacked actions used by anything other than a full
 commit SHA; the decode-then-exec config dropper shape outside package stores; agent and
-IDE config injection in repositories; and a hash baseline of the home agent configs.
+IDE config injection in repositories, including an API base-URL redirect in an agent
+config (the October 2026 Downloads-folder `AGENTS.md` / `CLAUDE.md` lure plants one to
+capture the session token) and a committed `.npmrc` token (what the fake-interview Tailwind
+plugins need to resolve their private payload); and a hash baseline of the home agent configs.
 
 **The honest boundary.** It is a list, and a list is always behind the attacker by one
 publication. It tells you what landed, not what is safe. The durable controls are the
@@ -178,7 +181,8 @@ reading the agent config files an installer just wrote.
 Console extension; The Hacker News on the Apex fake accelerator, the Hades PyPI set, and
 the actions-cool / trivy-action tag hijacks; Huntress on the axios compromise; Iru on
 Rustbot; Rescana on the reactivated compromised actions; Help Net Security on the npm
-trusted-publishing flaw.
+trusted-publishing flaw; Forever Security and Checkmarx on the Downloads-folder agent lure
+and MALFEX; pkgwarden on the fake-interview Tailwind plugins (October 2026).
 
 ---
 

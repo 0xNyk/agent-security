@@ -158,14 +158,17 @@ if [[ -d "$DEV_DIR" ]]; then
     while read -r f; do find_hit "PREINSTALL-HOOK $f"; done
 fi
 
-# [4] npm lookalike packages in lockfiles.
-if (( ${#IOC_PKGS[@]} )) && [[ -d "$DEV_DIR" ]]; then
+# [4] npm lookalike packages in lockfiles. One walk collects every npm manifest and
+#     lockfile in the workspace; [4] and every [4b] version check read that list instead
+#     of walking once per indicator.
+LOCK_LIST="$(mktemp "${TMPDIR:-/tmp}/ioc-locks.XXXXXX")"
+[[ -d "$DEV_DIR" ]] && find "$DEV_DIR" -maxdepth 5 -type d \( "${PRUNE[@]}" \) -prune -o -type f \
+     \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock -o -name bun.lock -o -name bun.lockb -o -name package.json \) -print 2>/dev/null > "$LOCK_LIST"
+if (( ${#IOC_PKGS[@]} )) && [[ -s "$LOCK_LIST" ]]; then
   PKG_RE="$(printf '%s|' "${IOC_PKGS[@]}")"; PKG_RE="${PKG_RE%|}"
-  find "$DEV_DIR" -maxdepth 5 -type d \( "${PRUNE[@]}" \) -prune -o -type f \
-       \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock -o -name bun.lock -o -name bun.lockb -o -name package.json \) -print 2>/dev/null |
-    while read -r f; do
-      grep -qE "(^|[\"'/ ])(${PKG_RE})[@\"':/ ]" "$f" 2>/dev/null && find_hit "LOOKALIKE-PKG $f"
-    done
+  while read -r f; do   # -a: bun.lockb is binary, and grep without it reports no match
+    grep -aqE "(^|[\"'/ ])(${PKG_RE})[@\"':/ ]" "$f" 2>/dev/null && find_hit "LOOKALIKE-PKG $f"
+  done < "$LOCK_LIST"
 fi
 
 # [4b] Specific compromised npm releases: lockfiles + manifests, installed node_modules
@@ -179,13 +182,11 @@ if (( ${#IOC_NPMVER[@]} )); then
   for nv in ${IOC_NPMVER[@]+"${IOC_NPMVER[@]}"}; do
     name="${nv%%	*}"; ver="${nv#*	}"; ename="$(re_escape "$name")"; ever="$(re_escape "$ver")"
     base="${name##*/}"
-    if [[ -d "$DEV_DIR" ]]; then
-      find "$DEV_DIR" -maxdepth 5 -type d \( "${PRUNE[@]}" \) -prune -o -type f \
-           \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock -o -name bun.lock -o -name package.json \) -print 2>/dev/null |
-        while read -r f; do
-          grep -qE "(${ename}@${ever}([^0-9.]|$)|\"${ename}\"[[:space:]]*:[[:space:]]*\"${ever}\"|/${ename}/-/${base}-${ever}\.tgz|/${ename}@${ever}[:/])" "$f" 2>/dev/null &&
-            find_hit "COMPROMISED-NPM-RELEASE $name@$ver $f"
-        done
+    if [[ -s "$LOCK_LIST" ]]; then
+      while read -r f; do
+        grep -aqE "(${ename}@${ever}([^0-9.]|$)|\"${ename}\"[[:space:]]*:[[:space:]]*\"${ever}\"|/${ename}/-/${base}-${ever}\.tgz|/${ename}@${ever}[:/])" "$f" 2>/dev/null &&
+          find_hit "COMPROMISED-NPM-RELEASE $name@$ver $f"
+      done < "$LOCK_LIST"
     fi
     grep -F "/node_modules/$name/package.json" "$NM_MANIFESTS" | while read -r f; do
       grep -qE "\"version\"[[:space:]]*:[[:space:]]*\"${ever}\"" "$f" 2>/dev/null && find_hit "COMPROMISED-NPM-RELEASE $name@$ver $f"
@@ -198,6 +199,7 @@ if (( ${#IOC_NPMVER[@]} )); then
   done
   rm -f "$NM_MANIFESTS"
 fi
+rm -f "$LOCK_LIST"
 
 # [5] Rogue GitHub Actions workflows and self-hosted runner installs. One walk of the
 #     workspace collects every workflow file; [5], [5b] and [5c] read that list.
@@ -423,12 +425,44 @@ if not isinstance(d,dict): sys.exit(1)
 out={"mcpServers":d.get("mcpServers",{}),"projects":{k:v.get("mcpServers") for k,v in (d.get("projects") or {}).items() if isinstance(v,dict) and v.get("mcpServers")}}
 print(json.dumps(out,sort_keys=True))' "$1" 2>/dev/null
 }
+# The env map of a JSON agent config (Claude settings): where a base-URL redirect lands.
+API_KEYS="$(mktemp "${TMPDIR:-/tmp}/ioc-apikeys.XXXXXX")"
+env_object() {
+  (( HAVE_PY )) || { cat "$1" 2>/dev/null; return 0; }
+  python3 -I -c 'import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: sys.exit(1)
+e=d.get("env") if isinstance(d,dict) else None
+if isinstance(e,dict):
+    for k,v in e.items(): print(k, "=", json.dumps(v))' "$1" 2>/dev/null
+}
+# API base-URL redirect (the Downloads-folder AGENTS.md / CLAUDE.md lure, October 2026): a
+# redirected ANTHROPIC_BASE_URL / chatgpt_base_url hands the session token to whoever runs
+# the endpoint and lets them answer with tool calls. Repository scope is a finding; home
+# scope is a finding when the target is plain http or an IP literal and a note otherwise,
+# because a deliberate proxy lives there. Prints the file, never the URL.
+API_URL_RE='^[[:space:]]*((ANTHROPIC|OPENAI|CLAUDE|CODEX)[A-Z_]*(BASE_URL|API_BASE)|chatgpt_base_url|base_url)[[:space:]]*='
+api_redirect() {
+  local f="$1" scope="$2"
+  case "$f" in
+    *.json) env_object "$f" ;;   # unparseable: prints nothing here, the hooks check reports it
+    *)      cat "$f" ;;
+  esac 2>/dev/null | grep -E "$API_URL_RE" > "$API_KEYS"   # one matched key per line; only their values are tested
+  [[ -s "$API_KEYS" ]] || return 0
+  # a local model server (Ollama, LM Studio) is a plain-http loopback URL and a note, not a finding
+  if [[ "$scope" == repo ]] ||
+     grep -viE '//(localhost|127\.[0-9.]+|0\.0\.0\.0|\[::1\])([:/"]|$)' "$API_KEYS" | grep -qiE 'http://|https?://([^@/]*@)?[0-9]{1,3}(\.[0-9]{1,3}){3}'; then
+    find_hit "AGENT-API-REDIRECT $f"
+  else
+    note "agent-api-url: $f sets a custom API base URL (review it once; a redirect leaks the session token)"
+  fi
+}
 if [[ -d "$DEV_DIR" ]]; then
   CFG_LIST="$(mktemp "${TMPDIR:-/tmp}/ioc-cfg-list.XXXXXX")"
   find "$DEV_DIR" -maxdepth "$DEV_DEPTH" -type d \( "${PRUNE[@]}" \) -prune -o -type f \
        \( -path '*/.vscode/tasks.json' -o -path '*/.claude/settings.json' -o -path '*/.claude/settings.local.json' \
           -o -path '*/.cursor/settings.json' -o -path '*/.codex/hooks.json' -o -name '.mcp.json' \
-          -o -path '*/.cursor/mcp.json' -o -path '*/.vscode/mcp.json' -o -path '*/.codex/config.toml' \) -print 2>/dev/null |
+          -o -path '*/.cursor/mcp.json' -o -path '*/.vscode/mcp.json' -o -path '*/.codex/config.toml' -o -name '.npmrc' \) -print 2>/dev/null |
     grep -v '/tests/fixtures/' > "$CFG_LIST"
   grep '/\.vscode/tasks\.json$' "$CFG_LIST" |
     while read -r f; do grep -q 'folderOpen' "$f" 2>/dev/null && find_hit "AUTORUN-TASK $f"; done
@@ -441,6 +475,12 @@ if [[ -d "$DEV_DIR" ]]; then
         find_hit "REPO-AGENT-HOOK $f"
       fi
     done
+  grep -E '/\.claude/settings(\.local)?\.json$|/\.codex/config\.toml$' "$CFG_LIST" |
+    while read -r f; do api_redirect "$f" repo; done
+  # a committed .npmrc carrying a literal registry token: the fake-interview Tailwind lure
+  # (October 2026) needs it so its private scoped payload resolves. Path only, never the value.
+  grep '/\.npmrc$' "$CFG_LIST" |
+    while read -r f; do grep -qE '_authToken[[:space:]]*=[[:space:]]*["'"'"']?[^$"'"'"'[:space:]]' "$f" 2>/dev/null && find_hit "NPMRC-TOKEN $f"; done
   grep -E '(/\.mcp\.json|/\.cursor/mcp\.json|/\.vscode/mcp\.json|/\.codex/config\.toml)$' "$CFG_LIST" |
     while read -r f; do grep -qE "$FETCH_EXEC_RE" "$f" 2>/dev/null && find_hit "SUSPICIOUS-MCP-CONFIG $f"; done
   rm -f "$CFG_LIST"
@@ -460,7 +500,9 @@ for f in "$HOME_DIR/.cursor/mcp.json" "$HOME_DIR/.claude.json"; do
   [[ -n "$maps" ]] && grep -qE "$FETCH_EXEC_RE" <<<"$maps" && find_hit "HOME-MCP-CONFIG $f (fetch/exec shape in MCP servers)"
 done
 [[ -f "$HOME_DIR/.hermes/config.yaml" ]] && grep -qE "$FETCH_EXEC_RE" "$HOME_DIR/.hermes/config.yaml" 2>/dev/null && find_hit "HOME-AGENT-HOOK $HOME_DIR/.hermes/config.yaml (fetch/exec shape)"
-AGENT_CFG=( "$HOME_DIR/.cursor/mcp.json" "$HOME_DIR/.hermes/config.yaml" "$HOME_DIR/.vscode/tasks.json" "$HOME_DIR/.codex/hooks.json" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.claude.json" )
+[[ -f "$HOME_DIR/.codex/config.toml" ]] && grep -qE "$FETCH_EXEC_RE" "$HOME_DIR/.codex/config.toml" 2>/dev/null && find_hit "HOME-MCP-CONFIG $HOME_DIR/.codex/config.toml (fetch/exec shape)"
+for f in "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.codex/config.toml"; do [[ -f "$f" ]] && api_redirect "$f" home; done
+AGENT_CFG=( "$HOME_DIR/.cursor/mcp.json" "$HOME_DIR/.hermes/config.yaml" "$HOME_DIR/.vscode/tasks.json" "$HOME_DIR/.codex/hooks.json" "$HOME_DIR/.codex/config.toml" "$HOME_DIR/.claude/settings.json" "$HOME_DIR/.claude.json" )
 BASELINE="$STATE/agent-config.baseline"
 cfg_digest() {   # ~/.claude.json churns constantly; only its MCP server maps matter
   local f="$1"
@@ -483,7 +525,7 @@ else
     fi
   done < "$NEWBASE"
 fi
-rm -f "$NEWBASE"
+rm -f "$NEWBASE" "$API_KEYS"
 mark '[12] agent configs'
 
 n=$(grep -c . "$OUT" 2>/dev/null); n=${n:-0}

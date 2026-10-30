@@ -143,3 +143,81 @@ CRATEVER	internment	0.8.7
 CRATEVER	append-only-vec	0.1.9
 ABSPATH	/tmp/rust-setup	Rustbot stage-2 Mach-O
 ABSPATH	/private/tmp/rust-setup	Rustbot stage-2 Mach-O
+
+# ---- added 2026-10-30 ----
+
+# Fake job-interview Tailwind / Animate.css plugins (pkgwarden, OSV MAL-2026-17665..7, Oct 2026).
+# The plugin requires a private scoped package that resolves only with the npm token committed
+# in the lure repository's web/.npmrc, so the payload runs when the dev server loads
+# tailwind.config.js. No install scripts: --ignore-scripts does not help. The sweep also
+# reports a committed .npmrc with a literal token as NPMRC-TOKEN.
+NPMPKG	animatecss-tailwind-adapter	fake-interview Tailwind plugin
+NPMPKG	animatecss-tailwind-bridge	fake-interview Tailwind plugin
+NPMPKG	tailwind-animatecss-uniform	fake-interview Tailwind plugin (the one in the lure repo)
+NPMPKG	animatecss-tailwind-vectrix	fake-interview Tailwind plugin
+NPMPKG	animatecss-tailwind-luminary	fake-interview Tailwind plugin
+NPMPKG	animate-twcss-bridge	fake-interview Tailwind plugin
+NPMPKG	signalledger-diagnostics	fake-interview Tailwind plugin set
+NPMPKG	signalledger-bridge	fake-interview Tailwind plugin set
+NPMPKG	tailwindcss-keyframe-kit	fake-interview Tailwind plugin
+NPMPKG	tailwindcss-animate-catalog	fake-interview Tailwind plugin
+NPMPKG	animatecss-tailwind-plugin	fake-interview Tailwind plugin
+NPMPKG	animatecss-tailwind-helper	fake-interview Tailwind plugin
+NPMPKG	tailwindcss-motionanimate	fake-interview Tailwind plugin
+NPMPKG	tailwind-keyframes	fake-interview Tailwind plugin
+NPMPKG	tailwind-fabric	fake-interview Tailwind plugin
+NPMPKG	tailwindcss-animatemotion	fake-interview Tailwind plugin
+NPMPKG	animate-tailwind-kit	fake-interview Tailwind plugin
+NPMPKG	tailwind-css-keyframes	fake-interview Tailwind plugin
+NPMPKG	tailwind-animationlab	fake-interview Tailwind plugin
+NPMPKG	tailwind-animate-kit	fake-interview Tailwind plugin
+NPMPKG	tailwind-animatecss-kit	fake-interview Tailwind plugin
+NPMPKG	animate-twcss-pack	fake-interview Tailwind plugin
+NPMPKG	tailwind-kinetic	fake-interview Tailwind plugin
+NPMPKG	tailwind-animaflow-kit	fake-interview Tailwind plugin
+NPMPKG	animatecss-tailwind-graphic	fake-interview Tailwind plugin
+NPMPKG	animatecss-tailwind-binary	fake-interview Tailwind plugin
+NPMPKG	animatecss-tailwind-presets	fake-interview Tailwind plugin
+NPMPKG	tailwindcss-effect-lab	fake-interview Tailwind plugin
+NPMPKG	tailwindcss-visual-kit	fake-interview Tailwind plugin
+NPMPKG	@jasperquinn/postcss-motion-helpers	private scoped payload the plugins require
+NPMPKG	@aaron205whitmore/postcss-animate-utils	private scoped payload the plugins require
+
+# MALFEX (Checkmarx, Oct 2026): postinstall downloaders, a Go RAT and a Node stealer. The
+# payloads are Windows executables; the package names in a lockfile are the cross-platform
+# signal. The same operator's Downloads-folder AGENTS.md / CLAUDE.md lure (Forever Security,
+# 2026-10-26) talks an agent into installing function-color, and its Claude variant writes an
+# API base-URL redirect into .claude/settings.json (AGENT-API-REDIRECT).
+NPMPKG	function-flag	MALFEX postinstall downloader
+NPMPKG	function-color	MALFEX wrapper that installs function-flag
+NPMPKG	cdn-img-fetch	MALFEX stealer chain
+NPMPKG	img-to-native	MALFEX stealer chain
+NPMPKG	native-runner	MALFEX stealer chain
+NPMPKG	tlxbnhd	MALFEX Overlord RAT loader
+NPMPKG	tldriver	MALFEX Overlord RAT loader
+NPMPKG	mxdriver	MALFEX Overlord RAT loader
+PATH	Downloads/AGENTS.md	agent instruction file a web page saved without a click (Forever Security, 2026-10-26)
+PATH	Downloads/CLAUDE.md	agent instruction file a web page saved without a click (Forever Security, 2026-10-26)
+
+# GitHub malware advisories 2026-10-27..30, developer- and agent-tooling packages only
+NPMVER	@atlisp/mcp	1.12.14
+NPMVER	@atlisp/mcp	1.6.10
+NPMVER	@zaip-ai/cli	6.4.0
+NPMVER	dsh-redteam-mode	0.15.2
+NPMVER	dsh-volcengine-provider	0.2.8
+NPMVER	dsh-plugin-blender-3d	0.2.1
+NPMVER	itsa-utils	1.4.2
+NPMVER	itsa-react-checkbox	16.0.5
+NPMVER	@walknpm/todo-cli	2.0.1
+NPMPKG	camelotlabs-core	Web3 lure set (advisory 2026-10-28)
+NPMPKG	camelotlabs-sdk	Web3 lure set (advisory 2026-10-28)
+NPMPKG	camelotlabs-utils	Web3 lure set (advisory 2026-10-28)
+NPMPKG	camelotlabs-worker	Web3 lure set (advisory 2026-10-28)
+NPMPKG	camelotlabs-config	Web3 lure set (advisory 2026-10-28)
+NPMPKG	mock-transactions-sdk	Web3 lure (advisory 2026-10-28)
+NPMPKG	transaction-info-generate-sdk	Web3 lure (advisory 2026-10-28)
+NPMPKG	@chatunitycenter/baileys	WhatsApp library lookalike (advisory 2026-10-29)
+PYVER	log-utils-sdk	0.4.1
+PYVER	trajmetrics	0.5.3
+PYVER	numprint	1.2.0
+PYVER	twitter-request-diagnostics	1.0.0
