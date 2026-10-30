@@ -28,3 +28,6 @@ blocked.log
 tmp/
 coverage/
 *.log
+
+# git worktrees created by agents/tools (kept out of the source root)
+.worktrees/
