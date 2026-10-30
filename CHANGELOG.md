@@ -5,6 +5,14 @@ All notable changes to this project are documented here. This project adheres to
 
 ## 0.3.0 — 2026-10-30
 
+- **No more `| grep -q` under `pipefail`, in detectors or tests.** Every script and test
+  runs with `pipefail`, and 43 places piped `echo` / `printf` into `grep -q`. `grep -q` exits
+  on its first match; when the producer still had bytes to write it died of `SIGPIPE`, the
+  pipeline returned 141, and a match read as a miss. In the tests that was an intermittent
+  failure under load. In `runtime-audit.sh` it was a silent false negative: a dropper whose
+  command line was longer than one write buffer, which a padded base64 blob easily is, could
+  pass the exec-sink and encoder checks. All of them now use here-strings, and a fixture
+  runs the dropper shape on a 200 KB command line.
 - **ioc: the three campaigns published since the list was last updated, and two checks for
   the mechanisms behind them.** Indicators for the fake job-interview Tailwind / Animate.css
   plugin set (29 packages plus the two private scoped payloads they require), MALFEX

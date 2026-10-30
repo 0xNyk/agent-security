@@ -297,7 +297,7 @@ LOCALHOST_RE='https?://(localhost|127\.0\.0\.1):[0-9]+'
 apply_allow() { # stdin → stdout minus --allow patterns
   local out; out="$(cat)"
   for p in ${ALLOW_PATTERNS[@]+"${ALLOW_PATTERNS[@]}"}; do
-    out="$(echo "$out" | grep -vE -- "$p" || true)"
+    out="$(grep -vE -- "$p" <<<"$out" || true)"
   done
   [[ -n "$out" ]] && echo "$out" || true
 }

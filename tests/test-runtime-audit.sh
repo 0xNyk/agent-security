@@ -37,11 +37,11 @@ run_audit() { # label, expected_exit, baseline_subdir, [extra args...]
   fi
 }
 expect_in() {
-  if echo "$LAST_OUT" | grep -qF -- "$2"; then echo "  ok  $1"
+  if grep -qF -- "$2" <<<"$LAST_OUT"; then echo "  ok  $1"
   else echo "  XX  $1 — output lacks: $2"; FAILURES=$((FAILURES+1)); fi
 }
 expect_not_in() {
-  if echo "$LAST_OUT" | grep -qF -- "$2"; then
+  if grep -qF -- "$2" <<<"$LAST_OUT"; then
     echo "  XX  $1 — output should not contain: $2"; FAILURES=$((FAILURES+1))
   else echo "  ok  $1"; fi
 }
@@ -76,6 +76,14 @@ expect_in "names the fetcher" "network-fetch"
 expect_in "names the C2 class" "blockchain-c2"
 expect_in "gives a triage command" "lsof -nP -p 4242"
 expect_in "routes to containment guidance" "kill -STOP"
+
+# The same dropper with ~200 KB of padding after the markers. The sinks match early, so a
+# `printf | grep -q` under pipefail could see grep exit mid-write and read the match as a
+# miss; the checks use here-strings so a long command line is still caught.
+{ tr -d '\n' <"$TMP/ps-dropper.txt"; printf ' //'; head -c 200000 /dev/zero | tr '\0' A; printf '\n'; } >"$TMP/ps-longline.txt"
+run_audit "dropper on a 200 KB command line is CRIT" 1 base-longline --ps-file "$TMP/ps-longline.txt"
+expect_in "long line still names the exec sink" "exec-sink:eval"
+expect_in "long line still names the encoder" "encoder"
 
 # Long-lived inline eval with no dropper markers: suspicious, not conclusive.
 cat >"$TMP/ps-longeval.txt" <<'EOF'

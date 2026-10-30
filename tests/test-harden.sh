@@ -63,12 +63,12 @@ run() { # label expected_exit needle authfile
   set -e
   local ok=1
   [[ "$code" -eq "$expect" ]] || ok=0
-  echo "$out" | grep -qF -- "$needle" || ok=0
+  grep -qF -- "$needle" <<<"$out" || ok=0
   if [[ "$ok" -eq 1 ]]; then
     echo "  ok  $label (exit $code)"
   else
     echo "  XX  $label — expected exit $expect + '$needle', got exit $code"
-    echo "$out" | grep -E 'HIGH|MED|OK|WARN|HARDEN' | head -4
+    grep -E 'HIGH|MED|OK|WARN|HARDEN' <<<"$out" | head -4
     FAILURES=$((FAILURES + 1))
   fi
 }
@@ -85,7 +85,7 @@ run "fine-grained PAT    -> UNKNOWN, exit 3" 3 "token=UNKNOWN_FINEGRAINED" "$TMP
 # and must NOT be counted as a pass. Assert both, in brief and full output.
 for f in error notloggedin finegrained; do
   OUT="$(bash "$CHECK" --offline --brief --auth-status-file "$TMP/$f.txt" 2>&1 || true)"
-  if echo "$OUT" | grep -qF "do NOT treat this as safe"; then
+  if grep -qF "do NOT treat this as safe" <<<"$OUT"; then
     echo "  ok  $f states 'do NOT treat this as safe'"
   else
     echo "  XX  $f missing 'do NOT treat this as safe' warning"; FAILURES=$((FAILURES + 1))
@@ -98,12 +98,12 @@ set +e
 OUT_UNK="$(bash "$CHECK" --offline --auth-status-file "$TMP/error.txt" 2>&1)"
 CODE_UNK=$?
 set -e
-if [[ "$CODE_UNK" -eq 3 ]] && echo "$OUT_UNK" | grep -qF "VERDICT: DEGRADED"; then
+if [[ "$CODE_UNK" -eq 3 ]] && grep -qF "VERDICT: DEGRADED" <<<"$OUT_UNK"; then
   echo "  ok  could-not-verify renders DEGRADED verdict (exit 3)"
 else
   echo "  XX  could-not-verify did not render DEGRADED verdict / exit 3 (got exit $CODE_UNK)"; FAILURES=$((FAILURES + 1))
 fi
-if echo "$OUT_UNK" | grep -qF "VERDICT: no confirmed HIGH exposure"; then
+if grep -qF "VERDICT: no confirmed HIGH exposure" <<<"$OUT_UNK"; then
   echo "  XX  FALSE COMFORT: could-not-verify run printed the clear-pass verdict"; FAILURES=$((FAILURES + 1))
 else
   echo "  ok  could-not-verify does NOT print the clear-pass verdict"
@@ -111,12 +111,12 @@ fi
 
 # The HIGH case must name the bypass thesis (the load-bearing framing).
 OUT_HIGH="$(bash "$CHECK" --offline --auth-status-file "$TMP/with.txt" 2>&1 || true)"
-if echo "$OUT_HIGH" | grep -qF "bypassable"; then
+if grep -qF "bypassable" <<<"$OUT_HIGH"; then
   echo "  ok  HIGH report states the guard is bypassable"
 else
   echo "  XX  HIGH report missing the 'bypassable' residual-risk framing"; FAILURES=$((FAILURES + 1))
 fi
-if echo "$OUT_HIGH" | grep -qi "delete_repo on the automation path"; then
+if grep -qi "delete_repo on the automation path" <<<"$OUT_HIGH"; then
   echo "  ok  prevention mapping names the token-scope fix"
 else
   echo "  XX  prevention mapping missing token-scope fix"; FAILURES=$((FAILURES + 1))

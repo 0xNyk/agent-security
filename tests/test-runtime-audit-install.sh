@@ -35,7 +35,7 @@ run_install() { # label, expected_exit, [args...]
   fi
 }
 expect_in() {
-  if echo "$LAST_OUT" | grep -qF -- "$2"; then echo "  ok  $1"
+  if grep -qF -- "$2" <<<"$LAST_OUT"; then echo "  ok  $1"
   else echo "  XX  $1 — output lacks: $2"; FAILURES=$((FAILURES+1)); fi
 }
 
@@ -68,7 +68,7 @@ expect_in "announces dry-run actions" "[dry-run]"
 expect_in "announces baseline refresh" "refreshing the audit's persistence baseline"
 # A dry run must never claim work it did not do: `run` returns 0 without acting, so a
 # success line gated on its exit status would lie about loading the scheduler.
-if echo "$LAST_OUT" | grep -qE '^  (loaded into launchd|timer enabled|added crontab entry)$'; then
+if grep -qE '^  (loaded into launchd|timer enabled|added crontab entry)$' <<<"$LAST_OUT"; then
   echo "  XX  dry-run claimed it performed a real action"; FAILURES=$((FAILURES+1))
 else
   echo "  ok  dry-run claims no work it did not do"

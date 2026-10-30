@@ -97,7 +97,7 @@ elif command -v gh >/dev/null 2>&1; then
   AUTH_TXT="$(gh auth status 2>&1 || true)"; AUTH_SRC="gh auth status"
 fi
 
-SCOPE_LINE="$(printf '%s\n' "$AUTH_TXT" | grep -i 'Token scopes:' | head -1 || true)"
+SCOPE_LINE="$(grep -i 'Token scopes:' <<<"$AUTH_TXT" | head -1 || true)"
 TOKEN_TIER="UNKNOWN"
 # HONEST FAILURE MODE: three states only —
 #   (a) readable + delete_repo   -> HIGH   (it CAN destroy)
@@ -112,7 +112,7 @@ if [[ -z "$AUTH_TXT" ]]; then
   warn "$CANT_VERIFY (gh not installed or no auth status available — $AUTH_SRC)"
   risk "scope is UNVERIFIED, not clear. UNKNOWN != safe: authenticate in a context where 'gh auth status' succeeds, then confirm the token carries NO delete_repo."
   TOKEN_TIER="UNKNOWN"
-elif printf '%s\n' "$AUTH_TXT" | grep -qiE 'invalid|failed to log in|not logged'; then
+elif grep -qiE 'invalid|failed to log in|not logged' <<<"$AUTH_TXT"; then
   warn "$CANT_VERIFY (gh could not read the token — not-logged-in / invalid / keyring error, $AUTH_SRC)"
   risk "gh could not read the token HERE — keyring/permission/session, not a proof of safety. DEGRADED, not benign. Do NOT record this run as a pass; the token's real scope is still unknown."
   fix "re-run in an interactive terminal where 'gh auth status' succeeds (keyring unlocked), then confirm the token carries NO delete_repo (mint a MINIMAL-scope automation token: repo,read:org,workflow — delete_repo ONLY for rare manual human deletes)."
@@ -122,7 +122,7 @@ elif [[ -z "$SCOPE_LINE" ]]; then
   risk "fine-grained PATs express repo administration as PERMISSIONS, not classic scopes — gh does not print them, so delete capability cannot be confirmed from here. Treat as UNVERIFIED, not safe."
   fix "open the token's page and confirm it lacks 'Administration: read+write' (which permits delete) on any repo it can reach."
   TOKEN_TIER="UNKNOWN_FINEGRAINED"
-elif printf '%s\n' "$SCOPE_LINE" | grep -q 'delete_repo'; then
+elif grep -q 'delete_repo' <<<"$SCOPE_LINE"; then
   hi "token carries delete_repo → it CAN delete/transfer any repo it can access"
   echo "        scopes: ${SCOPE_LINE#*Token scopes: }"
   risk "the local guard is bypassable (absolute-path gh / curl / octokit), so a token with delete_repo IS the residual risk. This is the single most important item to fix."
@@ -165,9 +165,9 @@ if [[ "$OFFLINE" -eq 1 ]]; then
   info "skipped (--offline). Org member-privilege settings are not reliably API-readable anyway."
 elif command -v gh >/dev/null 2>&1; then
   ORG_JSON="$(gh api "orgs/$ORG" 2>/dev/null || true)"
-  if [[ -n "$ORG_JSON" ]] && printf '%s' "$ORG_JSON" | grep -q 'members_can_delete_repositories'; then
-    VAL="$(printf '%s' "$ORG_JSON" | grep -o '"members_can_delete_repositories"[^,]*' | head -1)"
-    if printf '%s' "$VAL" | grep -q 'false'; then
+  if [[ -n "$ORG_JSON" ]] && grep -q 'members_can_delete_repositories' <<<"$ORG_JSON"; then
+    VAL="$(grep -o '"members_can_delete_repositories"[^,]*' <<<"$ORG_JSON" | head -1)"
+    if grep -q 'false' <<<"$VAL"; then
       good "members_can_delete_repositories = false (deletion restricted)"
     else
       hi "members_can_delete_repositories = true — org members CAN delete repos"

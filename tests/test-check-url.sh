@@ -25,7 +25,7 @@ run_expect() { # label, expected_exit, url, [flags...]
   LAST_OUT="$out"
 }
 expect_in() {
-  if echo "$LAST_OUT" | grep -qF -- "$2"; then echo "  ok  $1"
+  if grep -qF -- "$2" <<<"$LAST_OUT"; then echo "  ok  $1"
   else echo "  XX  $1 — output lacks: $2"; FAILURES=$((FAILURES+1)); fi
 }
 

@@ -99,12 +99,12 @@ rm -rf "$WORK/.git" 2>/dev/null
   git add -A 2>/dev/null
 )
 ENGINE_OUT="$(cd "$WORK" && AGENT_SECURITY_MARKERS=/dev/null bash "$SCAN_REPO" --all --markers /dev/null 2>&1)"
-ENGINE_CRIT="$(printf '%s\n' "$ENGINE_OUT" | grep -oE 'CRITICAL [0-9]+' | tail -1 | awk '{print $2}')"
-ENGINE_MAJOR="$(printf '%s\n' "$ENGINE_OUT" | grep -oE 'MAJOR [0-9]+' | tail -1 | awk '{print $2}')"
+ENGINE_CRIT="$(grep -oE 'CRITICAL [0-9]+' <<<"$ENGINE_OUT" | tail -1 | awk '{print $2}')"
+ENGINE_MAJOR="$(grep -oE 'MAJOR [0-9]+' <<<"$ENGINE_OUT" | tail -1 | awk '{print $2}')"
 ENGINE_CRIT="${ENGINE_CRIT:-0}"; ENGINE_MAJOR="${ENGINE_MAJOR:-0}"
 if [[ "$ENGINE_CRIT" -gt 0 ]]; then
   crit "scan-repo engine: $ENGINE_CRIT CRITICAL (dropper/secret/invisible-unicode) — see detail:"
-  printf '%s\n' "$ENGINE_OUT" | grep -E '\[(SECRET|DROPPER|WORM|INVISIBLE_UNICODE)' | sed 's/^/         /'
+  grep -E '\[(SECRET|DROPPER|WORM|INVISIBLE_UNICODE)' <<<"$ENGINE_OUT" | sed 's/^/         /'
 elif [[ "$ENGINE_MAJOR" -gt 0 ]]; then
   med "scan-repo engine: $ENGINE_MAJOR MAJOR (paths/infra/personal) — usually benign in third-party code, review"
 else

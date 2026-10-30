@@ -29,7 +29,7 @@ hook_call() {
   set -e
   local ok=1
   [[ "$code" -eq "$expect" ]] || ok=0
-  if [[ -n "$needle" ]] && ! echo "$out" | grep -qF -- "$needle"; then ok=0; fi
+  if [[ -n "$needle" ]] && ! grep -qF -- "$needle" <<<"$out"; then ok=0; fi
   if [[ "$ok" -eq 1 ]]; then
     echo "  ok  $label (exit $code)"
   else
@@ -103,14 +103,14 @@ hook_call "kill switch allows exe" 0 "" \
 
 # Multi-host block JSON (Hermes decision:block; Codex permissionDecision:deny)
 out=$(printf '%s' '{"tool_name":"web_fetch","tool_input":{"url":"https://e.example/a.exe"}}' | bash "$HOOK" 2>/dev/null || true)
-if echo "$out" | grep -Eq '"decision"[[:space:]]*:[[:space:]]*"block"'; then
+if grep -Eq '"decision"[[:space:]]*:[[:space:]]*"block"' <<<"$out"; then
   echo "  ok  multi-host decision:block JSON on stdout"
 else
   echo "  XX  decision:block JSON missing on stdout"
   echo "$out" | head -5
   FAILURES=$((FAILURES + 1))
 fi
-if echo "$out" | grep -Eq '"permissionDecision"[[:space:]]*:[[:space:]]*"deny"'; then
+if grep -Eq '"permissionDecision"[[:space:]]*:[[:space:]]*"deny"' <<<"$out"; then
   echo "  ok  Codex permissionDecision:deny JSON on stdout"
 else
   echo "  XX  permissionDecision:deny missing"

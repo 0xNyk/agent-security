@@ -295,7 +295,7 @@ for h in ${HISTORY_FILES[@]+"${HISTORY_FILES[@]}"}; do
         ts=""; cmd="$line"
         if [[ "$line" =~ ^:[[:space:]]*([0-9]+):[0-9]+\;(.*)$ ]]; then ts="${BASH_REMATCH[1]}"; cmd="${BASH_REMATCH[2]}"; fi
         [[ -n "$ts" && "$ts" -lt "$cutoff" ]] && continue
-        host="$(printf '%s' "$cmd" | grep -oE 'https?://[^/[:space:]"'"'"']+' | head -1 | sed -E 's#https?://##')"
+        host="$(grep -oE 'https?://[^/[:space:]"'"'"']+' <<<"$cmd" | head -1 | sed -E 's#https?://##')"
         when="unknown-date"; [[ -n "$ts" ]] && when="$(date -r "$ts" +%F 2>/dev/null || date -d "@$ts" +%F 2>/dev/null || echo "$ts")"
         find_hit "SHELL-LURE $name host=${host:-none} date=$when file=$(basename "$h")"
       done

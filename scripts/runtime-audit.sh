@@ -164,7 +164,7 @@ is_inline_eval() {
     node|nodejs|bun|deno|python|python[0-9]*) ;;
     sh|bash|zsh)
       # A shell is only interesting here when it pipes a download into another shell.
-      printf '%s' "$cmd" | grep -qE ' -c .*(curl|wget).*\| *(sh|bash)' && return 0
+      grep -qE ' -c .*(curl|wget).*\| *(sh|bash)' <<<"$cmd" && return 0
       return 1 ;;
     *) return 1 ;;
   esac
@@ -195,17 +195,17 @@ is_inline_eval() {
 # a respawn call, or a blockchain-C2 host. Mirrors scan-repo.sh's same-file rule.
 dropper_markers() {
   local cmd="$1" found=()
-  printf '%s' "$cmd" | grep -qE 'eval\(|new +Function\(|Function\(' && found+=("exec-sink:eval")
+  grep -qE 'eval\(|new +Function\(|Function\(' <<<"$cmd" && found+=("exec-sink:eval")
   # `[^;]` rather than `[^)]`: the decoded argument is routinely a nested call —
   # Buffer.from(fetch(u),'base64') — so a pattern that stops at the first ')'
   # misses the real shape. Bounded so it cannot run past the statement.
-  printf '%s' "$cmd" | grep -qE "atob[[:space:]]*\(|from[[:space:]]*\([^;]{0,160}['\"](base64|hex)|b64decode|base64[_-]?decode|fromhex[[:space:]]*\(" && found+=("encoder")
-  printf '%s' "$cmd" | grep -qE 'fetch\(|https?\.get\(|https?\.request\(|XMLHttpRequest|urllib|requests\.get' && found+=("network-fetch")
-  printf '%s' "$cmd" | grep -qE 'child_process|spawn\(|execSync|detached: *true' && found+=("respawn")
+  grep -qE "atob[[:space:]]*\(|from[[:space:]]*\([^;]{0,160}['\"](base64|hex)|b64decode|base64[_-]?decode|fromhex[[:space:]]*\(" <<<"$cmd" && found+=("encoder")
+  grep -qE 'fetch\(|https?\.get\(|https?\.request\(|XMLHttpRequest|urllib|requests\.get' <<<"$cmd" && found+=("network-fetch")
+  grep -qE 'child_process|spawn\(|execSync|detached: *true' <<<"$cmd" && found+=("respawn")
   # Public blockchain RPC endpoints are a known C2 retrieval channel. On their own
   # they are ordinary traffic for anyone doing blockchain work, so they never fire
   # alone — they only add weight to a process that is ALREADY an inline eval.
-  printf '%s' "$cmd" | grep -qE 'trongrid|aptoslabs|bsc-dataseed|publicnode|etherscan|blockchain\.info' && found+=("blockchain-c2")
+  grep -qE 'trongrid|aptoslabs|bsc-dataseed|publicnode|etherscan|blockchain\.info' <<<"$cmd" && found+=("blockchain-c2")
   # Join without a subshell: the $(IFS=,; echo ...) idiom reads as a useless echo to
   # linters, and this is the same result.
   if [[ ${#found[@]} -gt 0 ]]; then

@@ -44,7 +44,7 @@ check() { # label, expected_exit, expected_needle, cmd...
   set -e
   local ok=1
   [[ "$code" -eq "$expect" ]] || ok=0
-  if [[ -n "$needle" ]] && ! echo "$out" | grep -qF -- "$needle"; then ok=0; fi
+  if [[ -n "$needle" ]] && ! grep -qF -- "$needle" <<<"$out"; then ok=0; fi
   if [[ "$ok" -eq 1 ]]; then
     echo "  ok  $label (exit $code)"
   else
