@@ -221,3 +221,35 @@ PYVER	log-utils-sdk	0.4.1
 PYVER	trajmetrics	0.5.3
 PYVER	numprint	1.2.0
 PYVER	twitter-request-diagnostics	1.0.0
+
+# ---- added 2026-10-31 (GitHub malware advisories published since 2026-10-30) ----
+NPMPKG	@nexlayerlabs/postcss-keyframe-utils	GHSA-p485-mr88-5q38 2026-10-30
+NPMPKG	@pcb-dp/qa-commons	GHSA-w4v4-fj9q-cfj5 2026-10-30
+NPMPKG	@sxm-content-creators/tools-ds	GHSA-x4jx-pc3h-93v6 2026-10-30
+NPMPKG	@tops2/digital-assistant-ui	GHSA-r7vf-2jch-g55h 2026-10-30
+NPMPKG	apex-fetch	GHSA-gm35-cprq-hwp5 2026-10-30
+NPMPKG	claims-acct-unlock	GHSA-7338-2qv3-86fw 2026-10-30
+NPMPKG	dependencykfeg	GHSA-7p3p-8gfg-8grq 2026-10-30
+NPMPKG	grizzly-baileys	GHSA-7vq2-mvjp-g5gf 2026-10-30
+# GHSA-7j62-5j84-72fv 2026-10-31
+NPMVER	local-commander-agent	0.3.52
+NPMPKG	neuralwhatsapp	GHSA-367q-mf84-m8j3 2026-10-30
+NPMPKG	ourin-baileys	GHSA-5qgv-v3j9-f64g 2026-10-30
+NPMPKG	ssite-mock-server	GHSA-h5wr-6cx4-x5v4 2026-10-30
+# GHSA-2qvg-983g-prh5 2026-10-30
+NPMVER	tabby-fknat	0.1.2
+NPMPKG	tefeest-npm-com-test	GHSA-w7c9-wmgh-2r69 2026-10-30
+NPMPKG	vas-tops2-bidmatrix-ui	GHSA-3vw9-xvmr-x46h 2026-10-30
+NPMPKG	vas-tops2-core-client-cleanup-ui	GHSA-8j2v-vwh4-x2hm 2026-10-30
+NPMPKG	vas-tops2-core-clients-search	GHSA-7r8m-hmch-q36r 2026-10-30
+NPMPKG	vas-tops2-core-property-search	GHSA-3p56-fv8q-65jf 2026-10-30
+NPMPKG	vas-tops2-digital-assistant-ui	GHSA-pqp6-xfcj-j37c 2026-10-30
+NPMPKG	vas-tops2-reportingui	GHSA-v8fw-jm5x-fgg2 2026-10-30
+# GHSA-5vmf-xjrj-jqhh 2026-10-30
+NPMVER	wrangler-deploy	1.5.5
+# GHSA-9g52-4q2j-2cg3 2026-10-30
+PYVER	stdid-nyxprobe	0.0.1
+# GHSA-9g52-4q2j-2cg3 2026-10-30
+PYVER	stdid-nyxprobe	0.0.2
+# GHSA-9wjc-g5vf-3m22 2026-10-30
+PYVER	test-01-rafamarrara-learning-dc	1.0.0
