@@ -323,7 +323,10 @@ session.
 - **It is a list.** Every check is a name, path, version, or shape taken from public
   reporting. A renamed payload, a new package name, a version published after the list
   was last updated, or a loader split across two files walks past. The list is a
-  snapshot; append to it.
+  snapshot; `ioc-advisories.sh` prints the GitHub malware advisories published since its
+  newest dated section as candidate lines, so the gap is as wide as the time since you last
+  ran it. Advisories that never reach GitHub's database, and campaign artefacts that are
+  not packages (paths, workflow names, config shapes), still need a hand-written line.
 - **Hijacked actions are detected by reference.** The sweep cannot tell whether a tag has
   already been repointed. It reports every action used by tag or branch (note by default,
   `--strict-actions` for findings) because a full-SHA pin is the only thing that closes

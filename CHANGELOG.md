@@ -3,6 +3,28 @@
 All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+- **`ioc-advisories.sh`: the list no longer has to wait for a hand edit.** It reads
+  GitHub's malware advisories for npm, PyPI and crates.io published since the newest
+  dated section of `ioc-indicators.txt` (or `--since`), and prints candidate lines: a
+  `>= 0` range becomes a whole-package line, `= x.y.z` ranges become exact-version lines
+  with the advisory id on a comment above (the third column of a version line is the
+  version, so a note there would stop it matching), and anything else is a comment to
+  review. Already-listed packages are skipped, with PyPI names compared the PEP 503 way.
+  It never writes the list. Advisory text is third-party input, so only the name, version
+  and id are used, and each must match a strict ASCII character set in full: a newline,
+  tab or pattern character is rejected and counted, legal dots and pluses are escaped by
+  the sweep, and the prose never reaches the output. An empty or non-list response is
+  BLIND rather than "nothing new". `gh api` pages through everything when gh is installed, curl reads
+  one page otherwise, and a failed or malformed response is BLIND (exit 2). The first live
+  run added 24 lines for 30–31 October, including one more package from the fake-interview
+  Tailwind set and a `wrangler-deploy` lookalike.
+- **The lookalike-package pattern escapes each name.** Names were joined into one regular
+  expression unescaped, so the dots in a name like `dots.in.name` matched any character
+  and could fire on an unrelated package. The new suite's round trip through the sweep
+  caught it.
+
 ## 0.3.0 — 2026-10-30
 
 - **No more `| grep -q` under `pipefail`, in detectors or tests.** Every script and test

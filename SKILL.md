@@ -315,6 +315,18 @@ scripts/ioc-sweep.sh --depth 12        # deeper workspace walk (default 8)
 scripts/ioc-sweep.sh --timing          # per-section seconds on stderr
 ```
 
+Keep the list current with `ioc-advisories.sh`. It reads GitHub's malware advisories
+published since the newest dated section of the list and prints candidate lines to review.
+It never writes the list. Names and versions are checked against a strict character set and
+advisory prose is dropped, so a hostile advisory cannot inject pattern syntax or
+instructions into the indicators:
+
+```sh
+scripts/ioc-advisories.sh > new.txt              # since the last "added YYYY-MM-DD" header
+scripts/ioc-advisories.sh --since 2026-10-01 --match 'mcp|agent|cli|tailwind'
+less new.txt && cat new.txt >> scripts/ioc-indicators.txt
+```
+
 Finding tags: `DROP-PATH`, `PAYLOAD-FILE`, `REPO-PATH`, `TMP-STAGING`, `TMP-MACHO`,
 `LOOKALIKE-PKG`, `COMPROMISED-NPM-RELEASE`, `PREINSTALL-HOOK`, `ROGUE-WORKFLOW`,
 `ACTIONS-RUNNER`, `HIJACKED-ACTION-BY-TAG`, `MALICIOUS-PYPKG`, `COMPROMISED-PYPI-RELEASE`,
@@ -346,7 +358,9 @@ Limits, plainly:
 
 - **Names, paths, versions and shapes.** A renamed payload, a compromise published after
   the indicator list was last updated, or a loader split across two files walks past.
-  The list is a snapshot of public reporting through 30 October 2026.
+  The list is a snapshot of public reporting through 31 October 2026; `ioc-advisories.sh`
+  narrows the gap to however often you run it, and an advisory GitHub has not published
+  yet is still a gap.
 - **Hijacked-action detection is by reference, not content.** The sweep cannot tell
   whether a tag has already moved. What it can do is show every Action you use by tag
   or branch (a note by default, findings with `--strict-actions`) so you can pin them to

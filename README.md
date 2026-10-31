@@ -120,6 +120,7 @@ Schedule it. A manual audit only reports what was running at the moment someone 
 ```sh
 scripts/ioc-sweep.sh                  # exit 0 clean, 1 findings, 2 BLIND
 scripts/ioc-sweep.sh --accept-config  # after you deliberately change a home agent config
+scripts/ioc-advisories.sh             # new GitHub malware advisories as lines to review, never auto-appended
 ```
 
 ## Read the boundary before the verdict
