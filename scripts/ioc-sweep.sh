@@ -170,7 +170,8 @@ LOCK_LIST="$(mktemp "$WORK/ioc-locks.XXXXXX")"
 [[ -d "$DEV_DIR" ]] && find "$DEV_DIR" -maxdepth 5 -type d \( "${PRUNE[@]}" \) -prune -o -type f \
      \( -name package-lock.json -o -name pnpm-lock.yaml -o -name yarn.lock -o -name bun.lock -o -name bun.lockb -o -name package.json \) -print 2>/dev/null > "$LOCK_LIST"
 if (( ${#IOC_PKGS[@]} )) && [[ -s "$LOCK_LIST" ]]; then
-  PKG_RE="$(printf '%s|' "${IOC_PKGS[@]}")"; PKG_RE="${PKG_RE%|}"
+  # each name escaped: a package name is data, never pattern syntax ('.' would match anything)
+  PKG_RE=''; for p in "${IOC_PKGS[@]}"; do PKG_RE+="$(re_escape "$p")|"; done; PKG_RE="${PKG_RE%|}"
   while read -r f; do   # -a: bun.lockb is binary, and grep without it reports no match
     grep -aqE "(^|[\"'/ ])(${PKG_RE})[@\"':/ ]" "$f" 2>/dev/null && find_hit "LOOKALIKE-PKG $f"
   done < "$LOCK_LIST"
