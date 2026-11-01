@@ -198,11 +198,48 @@ left="$(find "$TT" -mindepth 1 2>/dev/null | head -3)"
 # ---------- agent-config drift round-trip (same clean HOME) ----------
 echo "[agent-config drift]"
 printf '{"mcpServers":{"chrome-devtools":{"command":"/usr/local/bin/cdm"},"helper":{"command":"node","args":["x.js"]}}}' > "$H/.cursor/mcp.json"
+# a value under env changes: drift is reported, the value never is
+sed -i.bak 's/"8192"/"16384"/' "$H/.claude/settings.json" && rm -f "$H/.claude/settings.json.bak"
+# a tool drops a skill into a shared skill directory
+mkdir -p "$H/.agents/skills/dropped-skill"; printf -- '---\nname: dropped-skill\n---\n' > "$H/.agents/skills/dropped-skill/SKILL.md"
+# a TOML config loosens its approval policy and gains an MCP env value: the policy shows, the value never does
+{ printf 'approval_policy = "never"\n'; cat "$H/.codex/config.toml"; printf '[mcp_servers.helper.env]\nHELPER_SETTING = "fixture-value-withheld-77"\n'; } > "$H/.codex/config.toml.new" && mv "$H/.codex/config.toml.new" "$H/.codex/config.toml"
 out="$T/drift.out"
 bash "$SWEEP" --home "$H" --dev "$D" --state "$S" --history "$H/.zsh_history" --ext-dir "$EXT" --tmp-dir "$TMPD" --no-notify > "$out" 2>&1
 rc=$?
 [[ $rc -eq 1 ]] && ok "exit 1 on agent-config drift" || { bad "exit $rc, expected 1"; sed 's/^/      /' "$out"; }
 expect_in "$out" "AGENT-CONFIG-DRIFT $H/.cursor/mcp.json"
+expect_in "$out" "config-diff: $H/.cursor/mcp.json: + mcpServers.helper.command = node"
+expect_in "$out" "AGENT-CONFIG-DRIFT $H/.claude/settings.json"
+expect_in "$out" "config-diff: $H/.claude/settings.json: - env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = <fp:"
+expect_in "$out" "config-diff: $H/.claude/settings.json: + env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = <fp:"
+expect_not_in "$out" "16384"
+expect_in "$out" "AGENT-SKILL-NEW $H/.agents/skills/dropped-skill"
+expect_in "$out" "config-diff: $H/.codex/config.toml: + approval_policy = never"
+expect_in "$out" "config-diff: $H/.codex/config.toml: + mcp_servers.helper.env.HELPER_SETTING = <fp:"
+expect_in "$out" "config-diff: $H/.cursor/mcp.json: + mcpServers.helper.args[0] = <fp:"   # list elements never in clear
+expect_not_in "$out" "x.js"
+expect_not_in "$out" "fixture-value-withheld-77"
+# the second review's shapes: a token as a TOML array element, a YAML list item with '=',
+# a value under env whose key is a SAFE name, and a token-shaped JSON key
+P="$T/probe-r3"; mkdir -p "$P/.codex" "$P/.hermes" "$P/.claude" "$P/st"
+printf 'x = 1\n' > "$P/.codex/config.toml"; printf 'a: 1\n' > "$P/.hermes/config.yaml"; printf '{}' > "$P/.claude/settings.json"
+bash "$SWEEP" --home "$P" --dev "$D" --state "$P/st" --history "$H/.zsh_history" --ext-dir "$EXT" --tmp-dir "$TMPD" --no-notify --accept-config >/dev/null 2>&1
+printf 'x = 1\n[mcp_servers.x]\nargs = [\n  "R3MARKA0000PAD==",\n  "--flag",\n]\n' > "$P/.codex/config.toml"
+printf 'a: 1\nmcp:\n  args:\n    - R3MARKB0000PAD==\n' > "$P/.hermes/config.yaml"
+printf '{"env":{"MODEL":"R3MARKC"},"mcpServers":{"R3MARKDabcdefghijklmnopqrstuvwxyz":{"command":"node"}},"model":"R3MARKEabcdefghijklmnopqrstu"}' > "$P/.claude/settings.json"
+r3="$T/r3.out"
+bash "$SWEEP" --home "$P" --dev "$D" --state "$P/st" --history "$H/.zsh_history" --ext-dir "$EXT" --tmp-dir "$TMPD" --no-notify > "$r3" 2>&1
+cat "$P/st/"*.txt "$P/st/agent-config.snap/"*.txt >> "$r3" 2>/dev/null
+expect_in "$r3" "config-diff: $P/.codex/config.toml: + mcp_servers.x.args[-] = <fp:"
+expect_not_in "$r3" "R3MARK"
+m="$(stat -c '%a' "$P/st/ioc-sweep-notes.txt" 2>/dev/null || stat -f '%Lp' "$P/st/ioc-sweep-notes.txt")"   # GNU first: on Linux stat -f means filesystem status
+[[ "$m" == 600 ]] && ok "notes file is mode 600" || bad "notes file mode $m"
+# a snapshot from before the allowlist (no format line) is discarded, never diffed in clear
+s1="$(ls "$P/st/agent-config.snap/"*.txt | head -1)"; printf 'old.format = R3MARKOLD\n' > "$s1"
+printf '{"model":"opus"}' > "$P/.claude/settings.json"; printf 'x = 2\n' > "$P/.codex/config.toml"; printf 'a: 2\n' > "$P/.hermes/config.yaml"
+bash "$SWEEP" --home "$P" --dev "$D" --state "$P/st" --history "$H/.zsh_history" --ext-dir "$EXT" --tmp-dir "$TMPD" --no-notify > "$r3" 2>&1
+expect_not_in "$r3" "R3MARKOLD"
 out="$T/accept.out"
 bash "$SWEEP" --home "$H" --dev "$D" --state "$S" --history "$H/.zsh_history" --ext-dir "$EXT" --tmp-dir "$TMPD" --no-notify --accept-config > "$out" 2>&1
 rc=$?

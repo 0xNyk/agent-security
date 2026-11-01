@@ -62,11 +62,17 @@ done
 (( EXPLICIT_EXT ))  || EXT_DIRS=("$HOME_DIR/.cursor/extensions" "$HOME_DIR/.vscode/extensions" "$HOME_DIR/.vscode-oss/extensions")
 (( EXPLICIT_TMP ))  || TMP_DIRS=("/tmp" "/private/tmp" "${TMPDIR:-}")
 
+umask 077   # findings, notes, baselines and snapshots describe this machine's configs
 [[ -r "$INDICATORS" ]] || { echo "BLIND: indicators file unreadable: $INDICATORS" >&2; exit 2; }
 mkdir -p "$STATE" 2>/dev/null || { echo "BLIND: cannot create $STATE" >&2; exit 2; }
 OUT="$STATE/ioc-sweep-findings.txt"
 LOG="$STATE/ioc-sweep.log"
 : > "$OUT" || { echo "BLIND: cannot write $OUT" >&2; exit 2; }
+# umask only shapes NEW files: tighten what an earlier version may have left readable
+chmod 700 "$STATE" 2>/dev/null
+for sf in "$OUT" "$LOG" "$STATE/ioc-sweep-notes.txt" "$STATE/agent-config.baseline" "$STATE/agent-skills.baseline"; do
+  [[ -e "$sf" ]] && chmod 600 "$sf" 2>/dev/null
+done
 # Every temporary list lives in one private directory that a trap removes on any exit,
 # including Ctrl-C and kill, so an interrupted sweep leaves nothing behind in tmp.
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/ioc-sweep.XXXXXX")" || { echo "BLIND: cannot create a work directory" >&2; exit 2; }
@@ -537,19 +543,192 @@ cfg_digest() {   # ~/.claude.json churns constantly; only its MCP server maps ma
     shasum -a 256 "$f" 2>/dev/null | cut -c1-16
   fi
 }
+# A structural summary of an agent config, one "path = value" line per leaf, so drift can
+# be reviewed instead of just reported. It is an ALLOWLIST: a value is shown in clear only
+# under a short list of keys that are settings, not credentials (model, approval policy,
+# sandbox mode, type, matcher, trust level, enabled flags, ...). A command shows only its
+# program; a URL only its scheme and host. Every other value, including every list element,
+# is a fingerprint keyed with a per-machine random salt: you see THAT it changed, never
+# what it is, and the snapshot files on disk hold no secrets either. The hash above still
+# decides drift; this only explains it.
+SNAPDIR="$STATE/agent-config.snap"
+mkdir -p "$SNAPDIR" 2>/dev/null && chmod 700 "$SNAPDIR" 2>/dev/null
+SALT="$SNAPDIR/.salt"
+[[ -s "$SALT" ]] || { od -An -tx1 -N16 /dev/urandom 2>/dev/null | tr -d ' \n' > "$SALT"; chmod 600 "$SALT" 2>/dev/null; }
+snap_of() { printf '%s/%s.txt' "$SNAPDIR" "$(printf '%s' "$1" | shasum -a 256 | cut -c1-16)"; }
+cfg_summary() {
+  (( HAVE_PY )) || return 0
+  python3 -I - "$1" "$SALT" <<'PY' 2>/dev/null
+import hashlib, hmac, json, os, re, sys
+from urllib.parse import urlsplit
+p, saltf = sys.argv[1], sys.argv[2]
+name = os.path.basename(p)
+try: salt = open(saltf, "rb").read().strip()
+except Exception: salt = b""
+SAFE = {"model", "model_provider", "model_reasoning_effort", "approval_policy", "sandbox_mode",
+        "sandbox", "type", "transport", "matcher", "trust_level", "enabled", "disabled",
+        "defaultmode", "theme", "effortlevel", "timeout", "startup_timeout_sec", "tool_timeout_sec",
+        "autoupdateschannel", "includecoauthoredby", "respectgitignore", "network_access"}
+URLKEYS = {"url", "base_url", "chatgpt_base_url", "endpoint", "server_url", "baseurl"}
+out = []
+def fp(v):
+    if len(salt) < 16: return "<fp:?>"   # no salt: an unkeyed hash of a short secret is guessable
+    s = v if isinstance(v, str) else json.dumps(v, sort_keys=True)
+    return "<fp:" + hmac.new(salt, s.encode("utf-8", "replace"), hashlib.sha256).hexdigest()[:10] + ">"
+def k_(k):
+    # key text is printed too: only plain, non-token-shaped names go out in clear
+    k = str(k)
+    if re.fullmatch(r"[A-Za-z0-9_.-]{1,48}", k) and not re.search(r"[A-Za-z0-9]{24,}", k): return k
+    return fp(k)
+def in_secret_subtree(parts):
+    return any(str(x).lower() in ("env", "headers", "environment") for x in parts[:-1])
+def val(parts, v):
+    key = parts[-1].lower() if parts else ""
+    if in_secret_subtree(parts): return fp(v)
+    if isinstance(v, bool) or v is None: return json.dumps(v)
+    s = v if isinstance(v, str) else json.dumps(v)
+    s = s.strip().strip("\"'")
+    if key in SAFE and len(s) <= 80 and re.fullmatch(r"[A-Za-z0-9 ._:/@+-]*", s) \
+       and not re.search(r"[A-Za-z0-9]{20,}", s) \
+       and (not key.endswith("timeout") and not key.endswith("_sec") or re.fullmatch(r"[0-9.]+", s)):
+        return s
+    if key in URLKEYS and not in_secret_subtree(parts):
+        try:
+            u = urlsplit(s)
+            if u.scheme and u.hostname:
+                rest = s[len(u.scheme) + 3 + len(u.netloc):]
+                return f"{u.scheme}://{u.hostname}{':' + str(u.port) if u.port else ''}" + (f" {fp(rest)}" if rest.strip('/') else "")
+        except ValueError: pass
+    if key == "command" and not in_secret_subtree(parts):
+        prog = s.split()[0] if s.split() else ""
+        if re.fullmatch(r"[A-Za-z0-9._/~$-]+", prog) and len(prog) <= 120:
+            return prog + (f" {fp(s)}" if prog != s else "")
+    return fp(v)
+def walk(o, parts):
+    path = ".".join(parts).replace(".[", "[") or "(top)"
+    if isinstance(o, dict):
+        if not o: out.append(f"{path} = {{}}")
+        for k, v in o.items(): walk(v, parts + [k_(k)])
+    elif isinstance(o, list):
+        if not o: out.append(f"{path} = []")
+        for i, v in enumerate(o):
+            if isinstance(v, (dict, list)): walk(v, parts + [f"[{i}]"])
+            else: out.append(f"{path}[{i}] = {fp(v)}")   # list elements are never shown
+    else:
+        out.append(f"{path} = {val(parts, o)}")
+text = open(p, encoding="utf-8", errors="replace").read()
+if name.endswith(".json"):
+    try: d = json.loads(text)
+    except Exception: sys.exit(0)
+    if name == ".claude.json" and isinstance(d, dict):   # only the MCP maps; the rest is UI state
+        d = {"mcpServers": d.get("mcpServers") or {},
+             "projects": {k: v.get("mcpServers") for k, v in (d.get("projects") or {}).items()
+                          if isinstance(v, dict) and v.get("mcpServers")}}
+    walk(d, [])
+else:   # TOML / YAML, line based: section headers and indentation give the path
+    stack = []; in_array = None
+    sep = "=" if name.endswith(".toml") else ":"
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if not line.strip() or line.lstrip().startswith("#"): continue
+        if in_array is not None:   # element lines of a multi-line TOML array: values, never keys
+            if line.strip().startswith("]"): in_array = None; continue
+            out.append(in_array + "[-] = " + fp(line.strip().rstrip(",")))
+            if line.rstrip().endswith("]"): in_array = None
+            continue
+        ind = len(line) - len(line.lstrip())
+        m = re.match(r"^\s*\[\[?([^\]]+)\]\]?\s*$", line)
+        if m and sep == "=":   # [a.b."c.d"] -> a, b, c.d
+            stack = [(-1, k_(c.strip("\"'"))) for c in re.findall(r'"[^"]*"|\'[^\']*\'|[^.\s]+', m.group(1))]
+            continue
+        if sep == "=":
+            m = re.match(r"""^\s*([A-Za-z0-9_."'-]+)\s*=\s*(.*)$""", line)
+            m = (None, None, m.group(1), m.group(2)) if m else None
+        else:   # YAML: "key: value" or "key:" (a list item "- key: value" opens a mapping)
+            mm = re.match(r"""^\s*(-\s+)?([A-Za-z0-9_."'-]+):(?:\s+(.*)|\s*)$""", line)
+            m = (None, mm.group(1), mm.group(2), mm.group(3) or "") if mm else None
+        if not m:
+            if line.lstrip().startswith("- ") or line.lstrip() == "-":
+                out.append(".".join(k for _, k in stack) + "[-] = " + fp(line.lstrip()[2:]))
+            continue
+        while stack and stack[-1][0] >= ind and stack[-1][0] != -1: stack.pop()
+        key = k_(m[2].strip("\"'")); parts = [k for _, k in stack] + [k_(c.strip("\"'")) for c in m[2].strip("\"'").split(".")]
+        v = m[3]
+        if sep == "=" and v.strip().startswith("[") and "]" not in v:
+            in_array = ".".join(parts); continue
+        if v == "": stack.append((ind, key)); continue
+        # a value that is not a plain scalar (inline table, flow collection, block scalar,
+        # multi-line string, trailing comment) is fingerprinted whole
+        plain = re.fullmatch(r"""\s*("[^"#]*"|'[^'#]*'|[A-Za-z0-9._:/@+-]+)\s*""", v)
+        out.append(".".join(parts) + " = " + (val(parts, v) if plain else fp(v)))
+for l in sorted(set(out)): print(l)
+PY
+}
+SNAP_FMT='# ioc-sweep config snapshot fmt=2 (allowlist + salted fingerprints)'
+cfg_snapshot() { local s; s="$(snap_of "$1")"; { echo "$SNAP_FMT"; cfg_summary "$1"; } > "$s" 2>/dev/null; chmod 600 "$s" 2>/dev/null; }
+# a snapshot without the current format line is discarded unread: it may predate the
+# allowlist and hold values in clear
+for s in "$SNAPDIR"/*.txt; do [[ -f "$s" ]] || continue; [[ "$(head -1 "$s")" == "$SNAP_FMT" ]] || rm -f "$s"; done
 NEWBASE="$(mktemp "$WORK/ioc-cfg.XXXXXX")"
+CUR="$WORK/ioc-cfg-current.txt"
 for f in ${AGENT_CFG[@]+"${AGENT_CFG[@]}"}; do [[ -f "$f" ]] && printf '%s\t%s\n' "$f" "$(cfg_digest "$f")" >> "$NEWBASE"; done
 if [[ ! -s "$BASELINE" || "$ACCEPT_CONFIG" == 1 ]]; then
   cp "$NEWBASE" "$BASELINE" 2>/dev/null && echo "$(date -u +%FT%TZ) agent-config baseline recorded" >> "$LOG"
+  while IFS=$'\t' read -r f _; do cfg_snapshot "$f"; done < "$NEWBASE"
 else
   while IFS=$'\t' read -r f h; do
     old="$(awk -F'\t' -v f="$f" '$1==f{print $2}' "$BASELINE")"
-    if [[ -z "$old" ]]; then find_hit "AGENT-CONFIG-NEW $f"
-    elif [[ "$old" != "$h" ]]; then find_hit "AGENT-CONFIG-DRIFT $f (run with --accept-config after review)"
+    snap="$(snap_of "$f")"
+    if [[ -z "$old" ]]; then
+      find_hit "AGENT-CONFIG-NEW $f"
+      cfg_summary "$f" > "$CUR"; head -15 "$CUR" | while IFS= read -r l; do note "config-diff: $f: + $l"; done
+    elif [[ "$old" != "$h" ]]; then
+      find_hit "AGENT-CONFIG-DRIFT $f (run with --accept-config after review)"
+      if (( ! HAVE_PY )); then
+        note "config-diff: $f: python3 missing, so the change cannot be itemised"
+      elif [[ -f "$snap" ]]; then
+        # the snapshot is left as it was until --accept-config, so the diff repeats daily
+        { echo "$SNAP_FMT"; cfg_summary "$f"; } > "$CUR"
+        diff "$snap" "$CUR" > "$WORK/ioc-cfg-diff.txt" 2>/dev/null
+        if grep -qE '^[<>]' "$WORK/ioc-cfg-diff.txt"; then
+          grep -E '^[<>]' "$WORK/ioc-cfg-diff.txt" | head -15 | sed -e 's/^</-/' -e 's/^>/+/' |
+            while IFS= read -r l; do note "config-diff: $f: $l"; done
+        else
+          note "config-diff: $f: the change is in formatting, comments or key order only"
+        fi
+      else
+        # no snapshot from an unreviewed state: it starts at the next --accept-config
+        note "config-diff: $f: no earlier snapshot to compare; after review, --accept-config starts explained drift"
+      fi
+    elif [[ ! -f "$snap" ]]; then
+      cfg_snapshot "$f"   # upgrade path: an unchanged config gets its first snapshot silently
     fi
   done < "$NEWBASE"
 fi
 rm -f "$NEWBASE" "$API_KEYS"
+
+# Skill directories are an install surface of their own: a tool can drop a skill into
+# ~/.agents/skills or ~/.claude/skills and every host that loads that directory reads it
+# as instructions. Content changes daily as people edit their own skills, so the baseline
+# is the set of skill NAMES; a new one is a finding until accepted.
+SKILL_ROOTS=( "$HOME_DIR/.claude/skills" "$HOME_DIR/.agents/skills" "$HOME_DIR/.codex/skills"
+              "$HOME_DIR/.cursor/skills" "$HOME_DIR/.hermes/skills" "$HOME_DIR/.grok/skills"
+              "$HOME_DIR/.config/opencode/skills" )
+SKILLBASE="$STATE/agent-skills.baseline"
+NEWSKILLS="$WORK/ioc-skills.txt"
+for r in ${SKILL_ROOTS[@]+"${SKILL_ROOTS[@]}"}; do
+  [[ -d "$r" ]] || continue
+  find -L "$r" -maxdepth 4 -type f -name SKILL.md 2>/dev/null | sed 's#/SKILL\.md$##'
+done | LC_ALL=C sort -u > "$NEWSKILLS"
+if [[ ! -f "$SKILLBASE" || "$ACCEPT_CONFIG" == 1 ]]; then
+  cp "$NEWSKILLS" "$SKILLBASE" 2>/dev/null &&
+    echo "$(date -u +%FT%TZ) agent-skills baseline recorded ($(grep -c . "$NEWSKILLS") skills)" >> "$LOG"
+else
+  LC_ALL=C comm -13 "$SKILLBASE" "$NEWSKILLS" |
+    while IFS= read -r d; do find_hit "AGENT-SKILL-NEW $d (read its SKILL.md and any scripts, then --accept-config)"; done
+  gone="$(LC_ALL=C comm -23 "$SKILLBASE" "$NEWSKILLS" | grep -c .)"
+  [[ "$gone" -gt 0 ]] && note "agent-skills: $gone skill(s) removed since the baseline"
+fi
 mark '[12] agent configs'
 
 n=$(grep -c . "$OUT" 2>/dev/null); n=${n:-0}
