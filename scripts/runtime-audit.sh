@@ -19,8 +19,9 @@
 #      mirroring the same-file co-occurrence rule in scan-repo.sh.
 #   3. Orphaned interpreters (PPID 1) — a parent that exited after spawning a
 #      detached child is the classic persistence stager.
-#   4. Autostart persistence drift against a recorded baseline (launchd plists on
-#      macOS, systemd user units / XDG autostart / cron.d on Linux).
+#   4. Autostart persistence drift against a recorded baseline (launchd plists and
+#      their referenced payload files on macOS; systemd user units / XDG autostart /
+#      cron.d on Linux).
 #   5. Shell-profile and agent-config drift against a recorded baseline.
 #
 # Exit: 0 clean or drift, 1 when any CRITICAL is found (usable as a cron gate),
@@ -174,6 +175,9 @@ is_inline_eval() {
 
   for (( i=1; i<${#tok_list[@]}; i++ )); do
     tok="${tok_list[$i]}"
+    # A bare "-" means the script arrives on stdin. Fake-interview implants seen in 2026
+    # ran their stage-2 as `node -` fed by a pipe, which no file path or -e flag reveals.
+    [[ "$tok" == "-" ]] && return 0
     if [[ "$tok" != -* ]]; then
       # A path or script name means every later flag belongs to that script.
       case "$tok" in
@@ -255,6 +259,46 @@ while IFS=$'\t' read -r pid ppid etime cmd; do
 done <<< "$PS_SNAPSHOT"
 (( ORPHAN_FOUND == 0 )) && ok "no orphaned inline-eval interpreters"
 
+say "[2b] orphaned interpreters running a script from a hidden, temp, or cache path"
+# A 2026 fake-interview implant ran its stage-1 as `node $HOME/.vscode/cache/app.js` for
+# days: no -e, no stdin, a plain file path, reparented to launchd. [1] and [2] never saw it. A
+# long-lived PPID-1 interpreter whose script lives under a dot-directory, /tmp,
+# /var/folders or a Caches directory is the file-based stager shape. Known tool
+# homes are allowlisted so language servers and MCP servers do not cry wolf.
+SUSPECT_PATH='(^|[[:space:]])[^[:space:]]*(/\.[A-Za-z0-9_-]+/|/tmp/|/var/folders/|/private/tmp/|/Caches/)[^[:space:]]*\.(js|mjs|cjs|py|ts|sh)([[:space:]]|$)'
+KNOWN_TOOL_HOMES='\.local/share/(fnm|mcp|claude|cursor-agent|uv|gstack|pnpm)/|\.npm/_npx/|\.codex/|\.cursor/extensions/|\.vscode/extensions/|\.hermes/(\.venv|skills)/|\.cargo/|\.rustup/|/node-versions/|\.nvm/|\.volta/|\.bun/install/|\.claude/(local|skills|plugins|hooks)/|\.pyenv/|\.pnpm-store/|\.orbstack/'
+# A launchd job is PPID 1 by design. Anything whose script path is named in a
+# LaunchAgent/LaunchDaemon plist is service-managed, and [3] already watches those
+# plists for drift, so it is excluded here rather than reported twice.
+# plutil reads binary plists too; plain cat covers XML ones on systems without it
+LAUNCHD_PROGRAMS="$(for pl in "$HOME"/Library/LaunchAgents/*.plist /Library/LaunchAgents/*.plist /Library/LaunchDaemons/*.plist; do
+  [[ -f "$pl" ]] || continue; plutil -convert xml1 -o - "$pl" 2>/dev/null || cat "$pl" 2>/dev/null
+done | grep -oE '<string>[^<]*</string>' | sed -E 's#</?string>##g')"
+launchd_managed() { # <cmd> — true when any path token of cmd is a launchd program/argument
+  local tok
+  for tok in $1; do
+    [[ "$tok" == */* ]] || continue
+    grep -qxF -- "$tok" <<<"$LAUNCHD_PROGRAMS" && return 0
+  done
+  return 1
+}
+HIDDEN_ORPHAN_FOUND=0
+while IFS=$'\t' read -r pid ppid etime cmd; do
+  [[ -z "${pid:-}" ]] && continue
+  [[ "$ppid" == "1" ]] || continue
+  [[ "$cmd" =~ (^|/)(node|nodejs|bun|deno|python[0-9.]*|sh|bash|zsh)([[:space:]]|$) ]] || continue
+  secs="$(etime_seconds "$etime")"
+  (( secs > MAX_INLINE_EVAL_SECONDS )) || continue
+  grep -qE "$SUSPECT_PATH" <<<"$cmd" || continue
+  grep -qE "$KNOWN_TOOL_HOMES" <<<"$cmd" && continue
+  launchd_managed "$cmd" && continue
+  HIDDEN_ORPHAN_FOUND=$((HIDDEN_ORPHAN_FOUND+1))
+  bad "pid $pid orphaned interpreter running a hidden-path script, up $etime — file-based stager shape"
+  printf '        %.140s…\n' "$cmd"
+  printf '        triage: ps -o pid,ppid,lstart,command -p %s · lsof -nP -p %s · shasum -a 256 <script>\n' "$pid" "$pid"
+done <<< "$PS_SNAPSHOT"
+(( HIDDEN_ORPHAN_FOUND == 0 )) && ok "no orphaned hidden-path script interpreters"
+
 # ---------------------------------------------------------------------------
 # Persistence drift. First run records a baseline; later runs diff against it.
 #
@@ -264,7 +308,9 @@ done <<< "$PS_SNAPSHOT"
 # snapshot_dir MODE LABEL DIR...
 #   MODE=all       hash every file in the directory. Correct for dedicated autostart
 #                  directories, where every entry IS a persistence mechanism —
-#                  including extensionless ones like /etc/cron.d/*.
+#                  including extensionless ones like /etc/cron.d/*. LaunchAgent plist
+#                  payloads are included too, so changing a referenced script cannot
+#                  evade drift detection by leaving the plist untouched.
 #   MODE=dotfiles  hash only rc/profile/env-shaped dotfiles. Correct for $HOME and
 #                  agent config directories, where hashing everything would produce
 #                  constant churn from ordinary work.
@@ -293,6 +339,45 @@ snapshot_dir() {
         find "$d" -maxdepth 1 -type f \
           \( -name '.*rc' -o -name '.*profile' -o -name '.*env' \
              -o -name '*.plist' -o -name '*.service' -o -name '*.desktop' \) 2>/dev/null
+      fi
+    done
+  } | sort -u | {
+    while IFS= read -r f; do
+      printf '%s\n' "$f"
+      if [[ "$mode" == "all" && "$f" == *.plist ]] && command -v python3 >/dev/null 2>&1; then
+        python3 - "$f" <<'PY' 2>/dev/null || true
+import os
+import plistlib
+import sys
+
+try:
+    with open(sys.argv[1], "rb") as handle:
+        payload = plistlib.load(handle)
+except Exception:
+    raise SystemExit(0)
+
+values = []
+program = payload.get("Program")
+if isinstance(program, str):
+    values.append(program)
+arguments = payload.get("ProgramArguments")
+if isinstance(arguments, list):
+    values.extend(item for item in arguments if isinstance(item, str))
+
+for value in values:
+    candidate = os.path.expanduser(value)
+    if not (os.path.isabs(candidate) and os.path.isfile(candidate)):
+        continue
+    # only scripts are payloads worth hashing: an interpreter or app binary (/bin/bash, a
+    # Homebrew or .app executable) changes on every update and would bury real drift
+    try:
+        with open(candidate, "rb") as handle:
+            head = handle.read(4096)
+    except OSError:
+        continue
+    if b"\0" not in head:
+        print(candidate)
+PY
       fi
     done
   } | sort -u | while IFS= read -r f; do hash_cmd "$f"; done | sort > "$tmp"

@@ -137,6 +137,35 @@ run_audit "interpreter flags after options still match" 1 base-real --ps-file "$
 expect_in "flags the node inline eval" "pid 7100"
 expect_in "flags the python inline eval" "pid 7101"
 
+# Fake-interview implant shapes (2026): a stage-2 `node -` stdin stager and a stage-1
+# file-based stager under a dot-directory, both reparented to launchd. Neither has
+# a -e flag, so the inline-eval walker alone never saw them. Inert fixture strings.
+cat >"$TMP/ps-stagers.txt" <<'EOF'
+ 90432     1  3-02:00:00 node /srv/u/.vscode/cache/app.js
+ 91677     1  1-00:00:00 node -
+ 91680  4000    02:00:00 python3 - --flag
+EOF
+run_audit "stdin and hidden-path stagers are CRIT" 1 base-stagers --ps-file "$TMP/ps-stagers.txt"
+expect_in "flags the hidden-path file stager" "pid 90432 orphaned interpreter running a hidden-path script"
+expect_in "flags the stdin stager as orphaned" "pid 91677 orphaned inline-eval"
+expect_in "stdin stager counts as inline eval" "pid 91680"
+
+# Long-lived PPID-1 interpreters from known tool homes or launchd jobs are services,
+# not stagers. The launchd plist below names the script so [2b] must skip it.
+mkdir -p "$TMP/sandbox-home/Library/LaunchAgents"
+cat >"$TMP/sandbox-home/Library/LaunchAgents/com.example.sweep.plist" <<'EOF'
+<plist><dict><key>ProgramArguments</key><array><string>/bin/bash</string><string>/srv/u/.local/share/example/sweep.sh</string></array></dict></plist>
+EOF
+cat >"$TMP/ps-hidden-benign.txt" <<'EOF'
+ 20256     1  1-22:50:47 node /srv/u/.local/share/fnm/node-versions/v22/lib/node_modules/typescript-language-server/lib/cli.mjs --stdio
+ 55071     1  3-22:31:23 node /srv/u/.npm/_npx/e59639a0673db70c/node_modules/.bin/mcp-server
+ 68288     1    03:40:46 /bin/bash /srv/u/.local/share/example/sweep.sh
+EOF
+run_audit "known tool homes and launchd jobs are not stagers" 0 base-hidden-benign --ps-file "$TMP/ps-hidden-benign.txt"
+expect_in "clean verdict" "RUNTIME: CLEAN"
+expect_not_in "language server not named" "pid 20256"
+expect_not_in "launchd job not named" "pid 68288"
+
 # --- drift fixtures --------------------------------------------------------
 
 # First run records the baseline; an immediate second run must be clean.
@@ -169,6 +198,18 @@ expect_in "reports the rc file" ".zshrc"
 run_audit "update-baseline accepts state" 0 base-drift --ps-file "$TMP/ps-clean.txt" --update-baseline
 run_audit "post-accept run is clean" 0 base-drift --ps-file "$TMP/ps-clean.txt"
 expect_not_in "drift cleared" "com.evil.persist.plist"
+
+# A plist is only the persistence pointer. The launched script is the payload, so
+# changing it must drift even when the plist itself is byte-for-byte unchanged.
+payload="$TMP/sandbox-home/persist-payload.sh"
+printf '#!/bin/sh\nexit 0\n' >"$payload"
+chmod 755 "$payload"
+printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>fixture.payload</string><key>ProgramArguments</key><array><string>/bin/sh</string><string>%s</string></array></dict></plist>\n' "$payload" >"$TMP/sandbox-home/Library/LaunchAgents/fixture.payload.plist"
+run_audit "payload baseline accepted" 0 base-drift --ps-file "$TMP/ps-clean.txt" --update-baseline
+printf '#!/bin/sh\nexit 1\n' >"$payload"
+run_audit "changed LaunchAgent payload is drift" 0 base-drift --ps-file "$TMP/ps-clean.txt"
+expect_in "reports the referenced payload" "$payload"
+expect_in "payload is labeled CHANGED" "CHANGED:"
 
 printf 'export EVIL=1\n' >>"$TMP/sandbox-home/.zshrc"
 run_audit "edited rc file is CHANGED" 0 base-drift --ps-file "$TMP/ps-clean.txt"

@@ -72,4 +72,5 @@ exec bash "$ROOT/scripts/scan-repo.sh" --all --markers /dev/null \
   --allow 'eval\(proxyInfo\)' \
   --allow 'APP_CONFIG_B64' \
   --allow 'devtools REPL helper' \
-  --allow 'var a=atob\(process'
+  --allow 'var a=atob\(process' \
+  --allow 'including a script fed on stdin, `node -`'
