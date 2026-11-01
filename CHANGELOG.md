@@ -5,6 +5,37 @@ All notable changes to this project are documented here. This project adheres to
 
 ## Unreleased
 
+- **ioc: drift you can review, and skills as an install surface.** A drifted home agent
+  config now comes with `config-diff:` notes that list the keys that changed, taken from a
+  structural snapshot kept beside the baseline. Until now the baseline was a hash, so a
+  drift notice could only be accepted on trust. Values are an allowlist, not a denylist:
+  a first version withheld values under credential-looking keys, and review showed
+  secrets in MCP `args`, in a hook command's `Bearer` header and in URL query strings
+  passing straight through. Now only settings such as model, approval policy, sandbox
+  mode, type, matcher and trust level are shown in clear, a command shows its program, a
+  URL its scheme and host, and every other value, list elements included, is a fingerprint
+  keyed with a per-machine random salt. A second review pass closed the rest: key and
+  section names are printed only when they are plain, non-token-shaped names; safe keys
+  never apply inside `env` or `headers`; a token-shaped value under a safe key is
+  fingerprinted; YAML list items and multi-line TOML array elements are values, never
+  keys; an empty salt yields `<fp:?>` instead of a guessable hash; and a snapshot without
+  the current format line is discarded unread. A fixture replays every leak the reviews
+  found and asserts none of the planted markers reaches stdout, notes, the log or a
+  snapshot. The sweep writes its state with `umask 077` and tightens files an earlier
+  version left readable. The
+  baseline also records the skill names in every agent skill directory, and a new one is
+  `AGENT-SKILL-NEW`, because tool installers now drop their own skills into
+  `~/.agents/skills`, where several coding agents load instructions. Upgrading records the
+  skill baseline silently on the first run; config snapshots start at the next
+  `--accept-config`, never from an unreviewed state.
+- **runtime: stdin stagers, hidden-path stagers, LaunchAgent payloads.** A script fed on
+  stdin (`node -`) counts as inline eval; a long-lived orphaned interpreter running a
+  script from a dot-directory, tmp or cache path is reported (`[2b]`), with known tool
+  homes and launchd jobs (binary plists included) excluded; and the drift baseline covers
+  the scripts a LaunchAgent launches, so a changed payload drifts even when its plist does
+  not. Binaries such as `/bin/bash` are not hashed, since every update would drift them.
+  These are the shapes a 2026 fake-interview implant used, and the earlier checks saw
+  neither.
 - **`ioc-advisories.sh`: the list no longer has to wait for a hand edit.** It reads
   GitHub's malware advisories for npm, PyPI and crates.io published since the newest
   dated section of `ioc-indicators.txt` (or `--since`), and prints candidate lines: a

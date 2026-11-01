@@ -238,9 +238,11 @@ scripts/runtime-audit.sh --quiet               # findings and verdict only
 
 Checks: inline-eval interpreters (`node -e`, `python -c`, `deno eval`, `bun -e`);
 dropper markers co-occurring in one command line (exec sink + encoder + fetcher +
-respawn + blockchain C2); orphaned PPID-1 interpreters, the detached-stager shape; and
-autostart + shell-profile drift against a recorded baseline (launchd plists, systemd
-user units, XDG autostart, `cron.d`).
+respawn + blockchain C2); orphaned PPID-1 interpreters, the detached-stager shape,
+including a script fed on stdin (`node -`); orphaned long-lived interpreters running a
+script from a dot-directory, tmp or a cache path, with known tool homes and launchd jobs
+excluded; and autostart + shell-profile drift against a recorded baseline (launchd plists
+and the scripts they launch, systemd user units, XDG autostart, `cron.d`).
 
 Exit codes are three-state on purpose: **0** clean or drift, **1** CRITICAL findings,
 **2 BLIND** — a check could not run at all. BLIND exists because a drift checker that
@@ -332,7 +334,7 @@ Finding tags: `DROP-PATH`, `PAYLOAD-FILE`, `REPO-PATH`, `TMP-STAGING`, `TMP-MACH
 `ACTIONS-RUNNER`, `HIJACKED-ACTION-BY-TAG`, `MALICIOUS-PYPKG`, `COMPROMISED-PYPI-RELEASE`,
 `PYTHON-STARTUP-HOOK`, `MALICIOUS-CRATE`, `HIJACKED-CRATE-RELEASE`, `ENV-DECODE-DROPPER`,
 `AUTORUN-TASK`, `REPO-AGENT-HOOK`, `SUSPICIOUS-MCP-CONFIG`, `AGENT-CONFIG-NEW`,
-`AGENT-CONFIG-DRIFT`, `AGENT-CONFIG-UNPARSEABLE`, `AGENT-CONFIG-UNCHECKED`,
+`AGENT-CONFIG-DRIFT`, `AGENT-SKILL-NEW`, `AGENT-CONFIG-UNPARSEABLE`, `AGENT-CONFIG-UNCHECKED`,
 `HOME-AGENT-HOOK`, `HOME-MCP-CONFIG`, `AGENT-API-REDIRECT`, `NPMRC-TOKEN`,
 `UNPINNED-ACTION` (strict mode), `TMP-ELF`,
 `TMP-SCRIPT`, `SHELL-LURE`, `APPLE-NAMED-EXEC`, `INVISIBLE-UNICODE-EXT`,
@@ -347,7 +349,16 @@ host (`agent-api-url`), which is either your proxy or the one thing to read toda
 
 Findings: `~/.local/state/agent-security/ioc-sweep-findings.txt`; log: `ioc-sweep.log`.
 The first run records the agent-config baseline silently; every later run reports
-`AGENT-CONFIG-NEW` / `AGENT-CONFIG-DRIFT` until you accept the change. Add an indicator by
+`AGENT-CONFIG-NEW` / `AGENT-CONFIG-DRIFT` until you accept the change. Each drift comes
+with `config-diff:` notes listing the keys that changed, from a snapshot kept in the state
+directory (mode 700). Values are an allowlist: only settings such as model, approval policy,
+sandbox mode, type, matcher and trust level are shown in clear, a command shows its
+program, a URL its scheme and host, and every other value, list elements included, is a
+fingerprint keyed with a per-machine random salt. You see that a value changed, not what
+it is, and the snapshots hold no secrets. The same baseline covers the skill names in every
+agent skill directory (`~/.claude/skills`, `~/.agents/skills`, `~/.codex/skills`,
+`~/.cursor/skills`, `~/.hermes/skills`, `~/.grok/skills`, `~/.config/opencode/skills`), so a
+tool that drops a skill where your agents load it is an `AGENT-SKILL-NEW` finding. Add an indicator by
 appending one `KIND<TAB>VALUE<TAB>note` line; the kinds are documented at the top of
 the file.
 
