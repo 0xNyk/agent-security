@@ -199,7 +199,16 @@ print(f"#   {cand} new candidate(s), {n_listed} already listed, {n_unmapped} unm
 print("#   Review every line before appending. A name here means GitHub published it as malware;")
 print("#   it does not mean it is on this machine.")
 print(f"\n# ---- added {today} (GitHub malware advisories published since {since}) ----")
-for t in out: print(t[3])
+last_comment = None
+for t in out:
+    lines = t[3].split("\n")
+    if len(lines) == 2 and lines[0] == last_comment:   # same advisory, next version: one comment
+        lines = lines[1:]
+    elif len(lines) == 2:
+        last_comment = lines[0]
+    else:
+        last_comment = None
+    print("\n".join(lines))
 PY
 rc=$?
 [[ $rc -eq 0 ]] || exit 2

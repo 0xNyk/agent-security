@@ -56,6 +56,8 @@ has "$out" "NPMVER${TAB}@scope/bad${TAB}1.2.3"
 has "$out" "# GHSA-aaaa-aaaa-aaa2 2026-10-30"
 has "$out" "NPMVER${TAB}multi${TAB}1.0.0"
 has "$out" "NPMVER${TAB}multi${TAB}1.0.1"
+n="$(grep -c '^# GHSA-aaaa-aaaa-aaa3 ' "$out")"
+[[ "$n" == 1 ]] && ok "one advisory comment above both of its versions" || bad "advisory comment printed $n times"
 has "$out" "PYVER${TAB}pybad${TAB}0.4.1"
 has "$out" "CRATE${TAB}crate_bad${TAB}"
 has "$out" "NPMPKG${TAB}pagetwo${TAB}"            # second page of the paginated response
